@@ -1,0 +1,142 @@
+{
+  "seed": 42,
+  "size": "1B",
+  "model": {
+    "d_model": 2048,
+    "vocab_size": 100352,
+    "n_layers": 16,
+    "block": {
+      "attention": {
+        "name": "default",
+        "n_heads": 16,
+        "bias": false,
+        "rope": {
+          "name": "default",
+          "theta": 500000,
+          "full_precision": true,
+          "no_global_rope": false,
+          "_CLASS_": "olmo_core.nn.rope.RoPEConfig"
+        },
+        "qk_norm": {
+          "name": "rms",
+          "eps": 1e-6,
+          "bias": false,
+          "dtype": "float32",
+          "_CLASS_": "olmo_core.nn.layer_norm.LayerNormConfig"
+        },
+        "backend": "flash_3",
+        "dtype": "float32",
+        "sliding_window": {
+          "pattern": [4096, 4096, 4096, -1],
+          "force_full_attention_on_first_layer": false,
+          "force_full_attention_on_last_layer": true,
+          "_CLASS_": "olmo_core.nn.attention.SlidingWindowAttentionConfig"
+        },
+        "_CLASS_": "olmo_core.nn.attention.AttentionConfig"
+      },
+      "layer_norm": {
+        "name": "rms",
+        "eps": 1e-6,
+        "bias": false,
+        "dtype": "float32",
+        "_CLASS_": "olmo_core.nn.layer_norm.LayerNormConfig"
+      },
+      "feed_forward": {
+        "hidden_size": 8192,
+        "name": "default",
+        "bias": false,
+        "dtype": "float32",
+        "_CLASS_": "olmo_core.nn.feed_forward.FeedForwardConfig"
+      },
+      "name": "reordered_norm",
+      "_CLASS_": "olmo_core.nn.transformer.config.TransformerBlockConfig"
+    },
+    "lm_head": {
+      "name": "default",
+      "layer_norm": {
+        "name": "rms",
+        "eps": 1e-6,
+        "bias": false,
+        "dtype": "float32",
+        "_CLASS_": "olmo_core.nn.layer_norm.LayerNormConfig"
+      },
+      "bias": false,
+      "dtype": "float32",
+      "loss_implementation": "default",
+      "_CLASS_": "olmo_core.nn.lm_head.LMHeadConfig"
+    },
+    "name": "default",
+    "dtype": "float32",
+    "init_method": "normal",
+    "init_seed": 0,
+    "init_std": 0.02,
+    "_CLASS_": "olmo_core.nn.transformer.config.TransformerConfig"
+  },
+  "optim": {
+    "group_overrides": [
+      {
+        "params": ["embeddings.weight"],
+        "opts": { "weight_decay": 0.0 },
+        "_CLASS_": "olmo_core.optim.config.OptimGroupOverride"
+      }
+    ],
+    "compile": false,
+    "fixed_fields": ["initial_lr"],
+    "lr": 0.0010308784697907792,
+    "betas": [0.9, 0.95],
+    "eps": 1e-8,
+    "weight_decay": 0.1,
+    "foreach": true,
+    "step_increment_bugfix": true,
+    "rolling_interval_length": 128,
+    "sigma_factor": 6,
+    "_CLASS_": "olmo_core.optim.adamw.SkipStepAdamWConfig"
+  },
+  "scheduler": {
+    "lr_field": "lr",
+    "initial_lr_field": "initial_lr",
+    "units": "tokens",
+    "period_lengths": [12793675776, 12793675776, 25588924416, 51174703104, 102352551936],
+    "warmup": 1279395840,
+    "decay_fraction": 0.1,
+    "warmup_min_lr": 0.0,
+    "decay_min_lr": 0.0,
+    "_CLASS_": "olmo_core.optim.scheduler.WSDS"
+  },
+  "data_loader": {
+    "seed": 0,
+    "shuffle": true,
+    "sources_per_epoch": -1,
+    "num_workers": 8,
+    "generate_doc_lengths": false,
+    "instance_filter_config": {
+      "repetition_max_period": 13,
+      "repetition_min_period": 1,
+      "repetition_max_count": 32,
+      "_CLASS_": "olmo_core.data.composable.data_loader.InstanceFilterConfig"
+    },
+    "display_source_visualization": true,
+    "_CLASS_": "olmo_core.data.composable.data_loader.ComposableDataLoaderConfig"
+  },
+  "instance_sources": [
+    {
+      "sources": [
+        {
+          "tokenizer": {
+            "vocab_size": 100278,
+            "eos_token_id": 100257,
+            "pad_token_id": 100277,
+            "identifier": "allenai/dolma2-tokenizer",
+            "_CLASS_": "olmo_core.data.tokenizer.TokenizerConfig"
+          },
+          "source_group_size": 1,
+          "mix": "OLMo-mix-0925",
+          "mix_base_dir": "gs://ai2-llm/",
+          "_CLASS_": "olmo_core.data.composable.numpy_document_source.NumpyDocumentSourceMixConfig"
+        }
+      ],
+      "sequence_length": 8192,
+      "_CLASS_": "olmo_core.data.composable.concat_and_chunk_instance_source.ConcatAndChunkInstanceSourceConfig"
+    }
+  ]
+}
