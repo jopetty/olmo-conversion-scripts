@@ -70,7 +70,7 @@ from torch.distributed.checkpoint.metadata import Metadata, MetadataIndex, Stora
 from torch.distributed.checkpoint.planner import LoadItemType, ReadItem
 from torch.futures import Future
 
-from transformers import AutoTokenizer, OlmoHybridSmallConfig
+from transformers import AutoTokenizer, OlmoHybridConfig, OlmoHybridSmallConfig
 
 
 # Mapping from string dtype names to torch dtypes
@@ -326,45 +326,143 @@ def load_model(model_path: str):
     return _load_unsharded_keys(model_path, keys)
 
 
+def get_layer_types_from_config(config: dict[str, Any]) -> list[str]:
+    model_config = config["model"]
+    block_config = model_config["block"]
+    n_layers = model_config["n_layers"]
+
+    if block_config.get("name") == "fla_hybrid":
+        attention_indices = set(block_config.get("fla_hybrid_attention_indices", []))
+        return [
+            "full_attention" if i in attention_indices else "linear_attention"
+            for i in range(n_layers)
+        ]
+
+    block_overrides = model_config.get("block_overrides", {})
+    if block_overrides:
+        attention_indices = {int(i) for i in block_overrides}
+        return [
+            "full_attention" if i in attention_indices else "linear_attention"
+            for i in range(n_layers)
+        ]
+
+    return get_layer_types_from_checkpoint({}, n_layers)
+
+
 def get_layer_types_from_checkpoint(loaded: dict[str, torch.Tensor], n_layers: int) -> list[str]:
     """
     Determine layer types by checking which layers have GDN-specific keys (A_log).
     """
     layer_types = []
     for i in range(n_layers):
-        if f"blocks.{i}.attention.A_log" in loaded:
+        if any(f"blocks.{i}.{prefix}.A_log" in loaded for prefix in ("attention", "fla", "sequence_mixer")):
             layer_types.append("linear_attention")
         else:
             layer_types.append("full_attention")
     return layer_types
 
 
-def convert_attention_layer_weights(
+def _required_any(loaded: dict[str, torch.Tensor], keys: list[str]) -> torch.Tensor:
+    for key in keys:
+        if key in loaded:
+            return loaded[key]
+    raise KeyError(f"Missing expected checkpoint key. Tried: {keys}")
+
+
+def _module_weight(loaded: dict[str, torch.Tensor], layer_i: int, suffix: str) -> torch.Tensor:
+    return _required_any(
+        loaded,
+        [
+            f"blocks.{layer_i}.attention.{suffix}",
+            f"blocks.{layer_i}.fla.{suffix}",
+            f"blocks.{layer_i}.sequence_mixer.{suffix}",
+        ],
+    )
+
+
+def _conv_weight_for_hf(tensor: torch.Tensor) -> torch.Tensor:
+    if tensor.ndim == 2:
+        return tensor.unsqueeze(1)
+    return tensor
+
+
+def convert_hybrid_attention_layer_weights(
     loaded: dict[str, torch.Tensor],
     layer_i: int,
 ) -> dict[str, torch.Tensor]:
-    """Convert weights for a full attention layer (NoPE + elementwise gate + per-head QK norm)."""
+    """Convert weights for a stock OlmoHybrid full attention layer."""
     prefix = f"blocks.{layer_i}"
     hf_prefix = f"model.layers.{layer_i}"
-    state_dict = {
-        # Attention projections
+    return {
         f"{hf_prefix}.self_attn.q_proj.weight": loaded[f"{prefix}.attention.w_q.weight"],
         f"{hf_prefix}.self_attn.k_proj.weight": loaded[f"{prefix}.attention.w_k.weight"],
         f"{hf_prefix}.self_attn.v_proj.weight": loaded[f"{prefix}.attention.w_v.weight"],
         f"{hf_prefix}.self_attn.o_proj.weight": loaded[f"{prefix}.attention.w_out.weight"],
-        # Elementwise attention gate
-        f"{hf_prefix}.self_attn.attn_gate.weight": loaded[f"{prefix}.attention.w_g.weight"],
-        # Per-head QK normalization
         f"{hf_prefix}.self_attn.q_norm.weight": loaded[f"{prefix}.attention.q_norm.weight"],
         f"{hf_prefix}.self_attn.k_norm.weight": loaded[f"{prefix}.attention.k_norm.weight"],
-        # MLP
         f"{hf_prefix}.mlp.gate_proj.weight": loaded[f"{prefix}.feed_forward.w1.weight"],
         f"{hf_prefix}.mlp.down_proj.weight": loaded[f"{prefix}.feed_forward.w2.weight"],
         f"{hf_prefix}.mlp.up_proj.weight": loaded[f"{prefix}.feed_forward.w3.weight"],
-        # Peri-norm: pre-attention norm (input_layernorm) + post-attention norm
+        f"{hf_prefix}.post_attention_layernorm.weight": loaded[f"{prefix}.attention_norm.weight"],
+        f"{hf_prefix}.post_feedforward_layernorm.weight": loaded[f"{prefix}.feed_forward_norm.weight"],
+    }
+
+
+def convert_hybrid_gdn_layer_weights(
+    loaded: dict[str, torch.Tensor],
+    layer_i: int,
+) -> dict[str, torch.Tensor]:
+    """Convert weights for a stock OlmoHybrid GatedDeltaNet layer."""
+    prefix = f"blocks.{layer_i}"
+    hf_prefix = f"model.layers.{layer_i}"
+    return {
+        f"{hf_prefix}.mlp.gate_proj.weight": loaded[f"{prefix}.feed_forward.w1.weight"],
+        f"{hf_prefix}.mlp.down_proj.weight": loaded[f"{prefix}.feed_forward.w2.weight"],
+        f"{hf_prefix}.mlp.up_proj.weight": loaded[f"{prefix}.feed_forward.w3.weight"],
+        f"{hf_prefix}.input_layernorm.weight": loaded[f"{prefix}.attention_norm.weight"],
+        f"{hf_prefix}.post_attention_layernorm.weight": loaded[f"{prefix}.feed_forward_norm.weight"],
+        f"{hf_prefix}.linear_attn.A_log": _module_weight(loaded, layer_i, "A_log"),
+        f"{hf_prefix}.linear_attn.dt_bias": _module_weight(loaded, layer_i, "dt_bias"),
+        f"{hf_prefix}.linear_attn.q_proj.weight": _module_weight(loaded, layer_i, "w_q.weight"),
+        f"{hf_prefix}.linear_attn.k_proj.weight": _module_weight(loaded, layer_i, "w_k.weight"),
+        f"{hf_prefix}.linear_attn.v_proj.weight": _module_weight(loaded, layer_i, "w_v.weight"),
+        f"{hf_prefix}.linear_attn.a_proj.weight": _module_weight(loaded, layer_i, "w_a.weight"),
+        f"{hf_prefix}.linear_attn.b_proj.weight": _module_weight(loaded, layer_i, "w_b.weight"),
+        f"{hf_prefix}.linear_attn.g_proj.weight": _module_weight(loaded, layer_i, "w_g.weight"),
+        f"{hf_prefix}.linear_attn.o_proj.weight": _module_weight(loaded, layer_i, "w_out.weight"),
+        f"{hf_prefix}.linear_attn.q_conv1d.weight": _conv_weight_for_hf(
+            _module_weight(loaded, layer_i, "q_conv1d.weight")
+        ),
+        f"{hf_prefix}.linear_attn.k_conv1d.weight": _conv_weight_for_hf(
+            _module_weight(loaded, layer_i, "k_conv1d.weight")
+        ),
+        f"{hf_prefix}.linear_attn.v_conv1d.weight": _conv_weight_for_hf(
+            _module_weight(loaded, layer_i, "v_conv1d.weight")
+        ),
+        f"{hf_prefix}.linear_attn.o_norm.weight": _module_weight(loaded, layer_i, "o_norm.weight"),
+    }
+
+
+def convert_attention_layer_weights(
+    loaded: dict[str, torch.Tensor],
+    layer_i: int,
+) -> dict[str, torch.Tensor]:
+    """Convert weights for a Hybrid Small full attention layer."""
+    prefix = f"blocks.{layer_i}"
+    hf_prefix = f"model.layers.{layer_i}"
+    state_dict = {
+        f"{hf_prefix}.self_attn.q_proj.weight": loaded[f"{prefix}.attention.w_q.weight"],
+        f"{hf_prefix}.self_attn.k_proj.weight": loaded[f"{prefix}.attention.w_k.weight"],
+        f"{hf_prefix}.self_attn.v_proj.weight": loaded[f"{prefix}.attention.w_v.weight"],
+        f"{hf_prefix}.self_attn.o_proj.weight": loaded[f"{prefix}.attention.w_out.weight"],
+        f"{hf_prefix}.self_attn.attn_gate.weight": loaded[f"{prefix}.attention.w_g.weight"],
+        f"{hf_prefix}.self_attn.q_norm.weight": loaded[f"{prefix}.attention.q_norm.weight"],
+        f"{hf_prefix}.self_attn.k_norm.weight": loaded[f"{prefix}.attention.k_norm.weight"],
+        f"{hf_prefix}.mlp.gate_proj.weight": loaded[f"{prefix}.feed_forward.w1.weight"],
+        f"{hf_prefix}.mlp.down_proj.weight": loaded[f"{prefix}.feed_forward.w2.weight"],
+        f"{hf_prefix}.mlp.up_proj.weight": loaded[f"{prefix}.feed_forward.w3.weight"],
         f"{hf_prefix}.input_layernorm.weight": loaded[f"{prefix}.attention_norm.weight"],
         f"{hf_prefix}.post_attention_layernorm.weight": loaded[f"{prefix}.post_attention_norm.weight"],
-        # Peri-norm: pre-FFN norm (ffn_layernorm) + post-FFN norm
         f"{hf_prefix}.ffn_layernorm.weight": loaded[f"{prefix}.feed_forward_norm.weight"],
         f"{hf_prefix}.post_feedforward_layernorm.weight": loaded[f"{prefix}.post_feed_forward_norm.weight"],
     }
@@ -375,11 +473,10 @@ def convert_gdn_layer_weights(
     loaded: dict[str, torch.Tensor],
     layer_i: int,
 ) -> dict[str, torch.Tensor]:
-    """Convert weights for a GatedDeltaNet (linear attention) layer."""
+    """Convert weights for a Hybrid Small GatedDeltaNet layer."""
     prefix = f"blocks.{layer_i}"
     hf_prefix = f"model.layers.{layer_i}"
     state_dict = {
-        # GDN projections
         f"{hf_prefix}.linear_attn.q_proj.weight": loaded[f"{prefix}.attention.w_q.weight"],
         f"{hf_prefix}.linear_attn.k_proj.weight": loaded[f"{prefix}.attention.w_k.weight"],
         f"{hf_prefix}.linear_attn.v_proj.weight": loaded[f"{prefix}.attention.w_v.weight"],
@@ -387,23 +484,17 @@ def convert_gdn_layer_weights(
         f"{hf_prefix}.linear_attn.g_proj.weight": loaded[f"{prefix}.attention.w_g.weight"],
         f"{hf_prefix}.linear_attn.a_proj.weight": loaded[f"{prefix}.attention.w_a.weight"],
         f"{hf_prefix}.linear_attn.b_proj.weight": loaded[f"{prefix}.attention.w_b.weight"],
-        # Output norm
         f"{hf_prefix}.linear_attn.o_norm.weight": loaded[f"{prefix}.attention.o_norm.weight"],
-        # Conv1d weights
         f"{hf_prefix}.linear_attn.q_conv1d.weight": loaded[f"{prefix}.attention.q_conv1d.weight"],
         f"{hf_prefix}.linear_attn.k_conv1d.weight": loaded[f"{prefix}.attention.k_conv1d.weight"],
         f"{hf_prefix}.linear_attn.v_conv1d.weight": loaded[f"{prefix}.attention.v_conv1d.weight"],
-        # GDN buffers
         f"{hf_prefix}.linear_attn.A_log": loaded[f"{prefix}.attention.A_log"],
         f"{hf_prefix}.linear_attn.dt_bias": loaded[f"{prefix}.attention.dt_bias"],
-        # MLP
         f"{hf_prefix}.mlp.gate_proj.weight": loaded[f"{prefix}.feed_forward.w1.weight"],
         f"{hf_prefix}.mlp.down_proj.weight": loaded[f"{prefix}.feed_forward.w2.weight"],
         f"{hf_prefix}.mlp.up_proj.weight": loaded[f"{prefix}.feed_forward.w3.weight"],
-        # Peri-norm: pre-attention norm (input_layernorm) + post-attention norm
         f"{hf_prefix}.input_layernorm.weight": loaded[f"{prefix}.attention_norm.weight"],
         f"{hf_prefix}.post_attention_layernorm.weight": loaded[f"{prefix}.post_attention_norm.weight"],
-        # Peri-norm: pre-FFN norm (ffn_layernorm) + post-FFN norm
         f"{hf_prefix}.ffn_layernorm.weight": loaded[f"{prefix}.feed_forward_norm.weight"],
         f"{hf_prefix}.post_feedforward_layernorm.weight": loaded[f"{prefix}.post_feed_forward_norm.weight"],
     }
@@ -439,17 +530,17 @@ def write_model(
     model_config = olmo_config["model"]
     block_config = model_config["block"]
     tokenizer_config = _get_tokenizer_config(olmo_config)
+    is_fla_hybrid = block_config.get("name") == "fla_hybrid"
 
     n_layers = model_config["n_layers"]
     dim = model_config["d_model"]
 
-    # Hybrid Small uses unified attention config for both GDN and full attention blocks.
-    # The block_overrides determine which layers are full attention.
-    block_overrides = model_config.get("block_overrides", {})
-
-    # Determine head configuration from block_overrides (full attention layers)
-    # or from the base block's sequence_mixer config.
-    if block_overrides:
+    if is_fla_hybrid:
+        attn_config = block_config["attention"]
+        n_heads = attn_config["n_heads"]
+        n_kv_heads = attn_config.get("n_kv_heads", n_heads)
+        head_dim = attn_config.get("head_dim", dim // n_heads)
+    elif block_overrides := model_config.get("block_overrides", {}):
         # Get attention config from the first override (full attention layer)
         first_override = next(iter(block_overrides.values()))
         attn_config = first_override.get("sequence_mixer", {})
@@ -461,10 +552,15 @@ def write_model(
         n_kv_heads = n_heads
         head_dim = dim // n_heads
 
-    # GDN config from base block
-    gdn_config = block_config.get("sequence_mixer", {})
-    gdn_n_heads = gdn_config.get("n_heads", n_heads)
-    gdn_head_dim = gdn_config.get("head_dim", head_dim)
+    if is_fla_hybrid:
+        gdn_config = block_config.get("fla", {}).get("fla_layer_kwargs", {})
+        gdn_n_heads = gdn_config.get("n_heads", gdn_config.get("num_heads", n_heads))
+        gdn_head_dim = gdn_config.get("head_dim", head_dim)
+    else:
+        # GDN config from base block
+        gdn_config = block_config.get("sequence_mixer", {})
+        gdn_n_heads = gdn_config.get("n_heads", n_heads)
+        gdn_head_dim = gdn_config.get("head_dim", head_dim)
     gdn_expand_v = gdn_config.get("expand_v", 2.0)
     gdn_value_head_dim = int(gdn_head_dim * gdn_expand_v)
 
@@ -474,6 +570,11 @@ def write_model(
     if max_sequence_length is None:
         max_sequence_length = olmo_config.get("dataset", {}).get("sequence_length")
     if max_sequence_length is None:
+        instance_sources = olmo_config.get("instance_sources", [])
+        sequence_lengths = [source["sequence_length"] for source in instance_sources if "sequence_length" in source]
+        if sequence_lengths:
+            max_sequence_length = max(sequence_lengths)
+    if max_sequence_length is None:
         max_sequence_length = 8192
         print(f"Warning: max_sequence_length not found in config or CLI, using default: {max_sequence_length}")
 
@@ -481,8 +582,7 @@ def write_model(
     loaded = load_model(os.path.join(input_base_path, "model_and_optim"))["model"]
     print(f"Loaded {len(loaded)} keys from checkpoint")
 
-    # Determine layer types from actual checkpoint keys
-    layer_types = get_layer_types_from_checkpoint(loaded, n_layers)
+    layer_types = get_layer_types_from_config(olmo_config)
     print(f"Layer types: {layer_types}")
 
     param_count = 0
@@ -491,7 +591,11 @@ def write_model(
     for layer_i in range(n_layers):
         layer_type = layer_types[layer_i]
 
-        if layer_type == "linear_attention":
+        if is_fla_hybrid and layer_type == "linear_attention":
+            layer_state = convert_hybrid_gdn_layer_weights(loaded, layer_i)
+        elif is_fla_hybrid:
+            layer_state = convert_hybrid_attention_layer_weights(loaded, layer_i)
+        elif layer_type == "linear_attention":
             layer_state = convert_gdn_layer_weights(loaded, layer_i)
         else:
             layer_state = convert_attention_layer_weights(loaded, layer_i)
@@ -502,53 +606,75 @@ def write_model(
 
     # Global weights
     full_state_dict["model.embed_tokens.weight"] = loaded["embeddings.weight"]
-    full_state_dict["model.embed_norm.weight"] = loaded["embedding_norm.weight"]
     full_state_dict["model.norm.weight"] = loaded["lm_head.norm.weight"]
     full_state_dict["lm_head.weight"] = loaded["lm_head.w_out.weight"]
-    param_count += sum(
-        v.numel()
-        for v in [
-            loaded["embeddings.weight"],
-            loaded["embedding_norm.weight"],
-            loaded["lm_head.norm.weight"],
-            loaded["lm_head.w_out.weight"],
-        ]
-    )
+    global_tensors = [loaded["embeddings.weight"], loaded["lm_head.norm.weight"], loaded["lm_head.w_out.weight"]]
+    if not is_fla_hybrid:
+        full_state_dict["model.embed_norm.weight"] = loaded["embedding_norm.weight"]
+        global_tensors.append(loaded["embedding_norm.weight"])
+    param_count += sum(v.numel() for v in global_tensors)
 
     # Cast all tensors to target dtype
     full_state_dict = {k: v.to(dtype) if torch.is_tensor(v) else v for k, v in full_state_dict.items()}
 
     print(f"Total parameters: {param_count}")
 
-    # Build HF config — NoPE model, so rope_parameters must disable RoPE
-    config = OlmoHybridSmallConfig(
-        vocab_size=model_config["vocab_size"],
-        hidden_size=dim,
-        intermediate_size=block_config["feed_forward"]["hidden_size"],
-        num_hidden_layers=n_layers,
-        num_attention_heads=n_heads,
-        num_key_value_heads=n_kv_heads,
-        head_dim=head_dim,
-        max_position_embeddings=max_sequence_length,
-        pad_token_id=tokenizer_config.get("pad_token_id"),
-        bos_token_id=tokenizer_config.get("bos_token_id"),
-        eos_token_id=tokenizer_config.get("eos_token_id"),
-        tie_word_embeddings=False,
-        rms_norm_eps=block_config.get("layer_norm", {}).get("eps", 1e-6),
-        layer_types=layer_types,
-        # GDN config
-        linear_num_key_heads=gdn_n_heads,
-        linear_num_value_heads=gdn_n_heads,
-        linear_key_head_dim=gdn_head_dim,
-        linear_value_head_dim=gdn_value_head_dim,
-    )
+    if is_fla_hybrid:
+        rope_config = block_config["attention"].get("rope", {})
+        config = OlmoHybridConfig(
+            vocab_size=model_config["vocab_size"],
+            hidden_size=dim,
+            intermediate_size=block_config["feed_forward"]["hidden_size"],
+            num_hidden_layers=n_layers,
+            num_attention_heads=n_heads,
+            num_key_value_heads=n_kv_heads,
+            hidden_act=block_config["feed_forward"].get("activation", "silu"),
+            max_position_embeddings=max_sequence_length,
+            pad_token_id=tokenizer_config.get("pad_token_id"),
+            bos_token_id=tokenizer_config.get("bos_token_id"),
+            eos_token_id=tokenizer_config.get("eos_token_id"),
+            tie_word_embeddings=False,
+            rms_norm_eps=block_config.get("layer_norm", {}).get("eps", 1e-6),
+            rope_parameters={"rope_type": "default", "rope_theta": rope_config["theta"]} if rope_config else None,
+            attention_bias=block_config["attention"].get("bias", False),
+            layer_types=layer_types,
+            linear_num_key_heads=gdn_n_heads,
+            linear_num_value_heads=gdn_n_heads,
+            linear_key_head_dim=gdn_head_dim,
+            linear_value_head_dim=gdn_value_head_dim,
+            linear_allow_neg_eigval=gdn_config.get("allow_neg_eigval", True),
+        )
+        config.architectures = ["OlmoHybridForCausalLM"]
+    else:
+        # Build HF config — NoPE model, so rope_parameters must disable RoPE
+        config = OlmoHybridSmallConfig(
+            vocab_size=model_config["vocab_size"],
+            hidden_size=dim,
+            intermediate_size=block_config["feed_forward"]["hidden_size"],
+            num_hidden_layers=n_layers,
+            num_attention_heads=n_heads,
+            num_key_value_heads=n_kv_heads,
+            head_dim=head_dim,
+            max_position_embeddings=max_sequence_length,
+            pad_token_id=tokenizer_config.get("pad_token_id"),
+            bos_token_id=tokenizer_config.get("bos_token_id"),
+            eos_token_id=tokenizer_config.get("eos_token_id"),
+            tie_word_embeddings=False,
+            rms_norm_eps=block_config.get("layer_norm", {}).get("eps", 1e-6),
+            layer_types=layer_types,
+            # GDN config
+            linear_num_key_heads=gdn_n_heads,
+            linear_num_value_heads=gdn_n_heads,
+            linear_key_head_dim=gdn_head_dim,
+            linear_value_head_dim=gdn_value_head_dim,
+        )
 
-    # Explicitly ensure NoPE — prevent Transformers from re-enabling RoPE
-    # (see: https://github.com/huggingface/transformers/issues — rope_parameters: null
-    # gets cast back to defaults in Transformers 5.7.0+)
-    config.rope_parameters = {"rope_theta": None}
+        # Explicitly ensure NoPE — prevent Transformers from re-enabling RoPE
+        # (see: https://github.com/huggingface/transformers/issues — rope_parameters: null
+        # gets cast back to defaults in Transformers 5.7.0+)
+        config.rope_parameters = {"rope_theta": None}
 
-    config.architectures = ["OlmoHybridSmallForCausalLM"]
+        config.architectures = ["OlmoHybridSmallForCausalLM"]
 
     # Save config and weights directly (no from_pretrained roundtrip)
     config.save_pretrained(model_path)
@@ -566,9 +692,10 @@ def write_model(
     if include_tokenizer:
         _write_tokenizer(model_path, tokenizer_id, tokenizer_config, max_sequence_length)
 
-    # Patch config.json to ensure rope_parameters stays null
-    # (config.save_pretrained may have written a default)
-    _patch_config_rope(model_path)
+    if not is_fla_hybrid:
+        # Patch config.json to ensure rope_parameters stays null
+        # (config.save_pretrained may have written a default)
+        _patch_config_rope(model_path)
 
     print(f"Conversion complete. Model saved to {model_path}")
 

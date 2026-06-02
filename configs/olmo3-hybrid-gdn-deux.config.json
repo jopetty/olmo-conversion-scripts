@@ -1,14 +1,14 @@
 {
   "seed": 42,
-  "size": "1B",
+  "size": "60M",
   "model": {
-    "d_model": 2048,
+    "d_model": 384,
     "vocab_size": 100352,
-    "n_layers": 16,
+    "n_layers": 8,
     "block": {
       "attention": {
         "name": "default",
-        "n_heads": 16,
+        "n_heads": 8,
         "bias": false,
         "rope": {
           "name": "default",
@@ -24,7 +24,7 @@
           "dtype": "float32",
           "_CLASS_": "olmo_core.nn.layer_norm.LayerNormConfig"
         },
-        "backend": "flash_3",
+        "backend": "flash_2",
         "dtype": "float32",
         "sliding_window": {
           "pattern": [4096, 4096, 4096, -1],
@@ -32,6 +32,7 @@
           "force_full_attention_on_last_layer": true,
           "_CLASS_": "olmo_core.nn.attention.SlidingWindowAttentionConfig"
         },
+        "use_head_qk_norm": false,
         "_CLASS_": "olmo_core.nn.attention.AttentionConfig"
       },
       "layer_norm": {
@@ -42,10 +43,11 @@
         "_CLASS_": "olmo_core.nn.layer_norm.LayerNormConfig"
       },
       "feed_forward": {
-        "hidden_size": 8192,
+        "hidden_size": 1536,
         "name": "default",
         "bias": false,
         "dtype": "float32",
+        "activation": "silu",
         "_CLASS_": "olmo_core.nn.feed_forward.FeedForwardConfig"
       },
       "fla": {
@@ -54,7 +56,7 @@
         "dtype": "float32",
         "_CLASS_": "olmo_core.nn.fla.layer.FLAConfig"
       },
-      "fla_hybrid_attention_indices": [3, 7, 11, 15],
+      "fla_hybrid_attention_indices": [3, 7],
       "name": "fla_hybrid",
       "_CLASS_": "olmo_core.nn.transformer.config.TransformerBlockConfig"
     },
@@ -89,8 +91,8 @@
     ],
     "compile": false,
     "fixed_fields": ["initial_lr"],
-    "lr": 0.0010308784697907792,
-    "betas": [0.9, 0.95],
+    "lr": 0.00290078685078361,
+    "betas": [0.9, 0.99],
     "eps": 1e-8,
     "weight_decay": 0.1,
     "foreach": true,
@@ -103,8 +105,8 @@
     "lr_field": "lr",
     "initial_lr_field": "initial_lr",
     "units": "tokens",
-    "period_lengths": [12793675776, 12793675776, 25588924416, 51174703104, 102352551936],
-    "warmup": 1279395840,
+    "period_lengths": [574095360, 574357504, 1148452864, 2296905728, 4593811456],
+    "warmup": 57422208,
     "decay_fraction": 0.1,
     "warmup_min_lr": 0.0,
     "decay_min_lr": 0.0,
