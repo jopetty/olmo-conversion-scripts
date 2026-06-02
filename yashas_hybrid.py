@@ -375,7 +375,27 @@ def _module_weight(loaded: dict[str, torch.Tensor], layer_i: int, suffix: str) -
         [
             f"blocks.{layer_i}.attention.{suffix}",
             f"blocks.{layer_i}.fla.{suffix}",
+            f"blocks.{layer_i}.fla.inner.{suffix}",
             f"blocks.{layer_i}.sequence_mixer.{suffix}",
+            f"blocks.{layer_i}.sequence_mixer.inner.{suffix}",
+        ],
+    )
+
+
+def _gdn_weight(loaded: dict[str, torch.Tensor], layer_i: int, olmo_suffix: str, hf_suffix: str) -> torch.Tensor:
+    return _required_any(
+        loaded,
+        [
+            f"blocks.{layer_i}.attention.{olmo_suffix}",
+            f"blocks.{layer_i}.fla.{olmo_suffix}",
+            f"blocks.{layer_i}.fla.inner.{olmo_suffix}",
+            f"blocks.{layer_i}.sequence_mixer.{olmo_suffix}",
+            f"blocks.{layer_i}.sequence_mixer.inner.{olmo_suffix}",
+            f"blocks.{layer_i}.attention.{hf_suffix}",
+            f"blocks.{layer_i}.fla.{hf_suffix}",
+            f"blocks.{layer_i}.fla.inner.{hf_suffix}",
+            f"blocks.{layer_i}.sequence_mixer.{hf_suffix}",
+            f"blocks.{layer_i}.sequence_mixer.inner.{hf_suffix}",
         ],
     )
 
@@ -435,13 +455,13 @@ def convert_hybrid_gdn_layer_weights(
         ),
         f"{hf_prefix}.linear_attn.A_log": _module_weight(loaded, layer_i, "A_log"),
         f"{hf_prefix}.linear_attn.dt_bias": _module_weight(loaded, layer_i, "dt_bias"),
-        f"{hf_prefix}.linear_attn.q_proj.weight": _module_weight(loaded, layer_i, "w_q.weight"),
-        f"{hf_prefix}.linear_attn.k_proj.weight": _module_weight(loaded, layer_i, "w_k.weight"),
-        f"{hf_prefix}.linear_attn.v_proj.weight": _module_weight(loaded, layer_i, "w_v.weight"),
-        f"{hf_prefix}.linear_attn.a_proj.weight": _module_weight(loaded, layer_i, "w_a.weight"),
-        f"{hf_prefix}.linear_attn.b_proj.weight": _module_weight(loaded, layer_i, "w_b.weight"),
-        f"{hf_prefix}.linear_attn.g_proj.weight": _module_weight(loaded, layer_i, "w_g.weight"),
-        f"{hf_prefix}.linear_attn.o_proj.weight": _module_weight(loaded, layer_i, "w_out.weight"),
+        f"{hf_prefix}.linear_attn.q_proj.weight": _gdn_weight(loaded, layer_i, "w_q.weight", "q_proj.weight"),
+        f"{hf_prefix}.linear_attn.k_proj.weight": _gdn_weight(loaded, layer_i, "w_k.weight", "k_proj.weight"),
+        f"{hf_prefix}.linear_attn.v_proj.weight": _gdn_weight(loaded, layer_i, "w_v.weight", "v_proj.weight"),
+        f"{hf_prefix}.linear_attn.a_proj.weight": _gdn_weight(loaded, layer_i, "w_a.weight", "a_proj.weight"),
+        f"{hf_prefix}.linear_attn.b_proj.weight": _gdn_weight(loaded, layer_i, "w_b.weight", "b_proj.weight"),
+        f"{hf_prefix}.linear_attn.g_proj.weight": _gdn_weight(loaded, layer_i, "w_g.weight", "g_proj.weight"),
+        f"{hf_prefix}.linear_attn.o_proj.weight": _gdn_weight(loaded, layer_i, "w_out.weight", "o_proj.weight"),
         f"{hf_prefix}.linear_attn.q_conv1d.weight": _conv_weight_for_hf(
             _module_weight(loaded, layer_i, "q_conv1d.weight")
         ),
