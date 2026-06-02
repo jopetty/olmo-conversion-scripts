@@ -8,3 +8,6 @@ dependencies = [
     "torch>=2.12.0",
     "transformers>=5.9.0",
 ]
+
+[tool.uv.sources]
+transformers = { git = "https://github.com/YashasSamaga/transformers.git", rev = "hybrid-small-suite" }
