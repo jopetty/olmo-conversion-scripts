@@ -419,8 +419,20 @@ def convert_hybrid_gdn_layer_weights(
         f"{hf_prefix}.mlp.gate_proj.weight": loaded[f"{prefix}.feed_forward.w1.weight"],
         f"{hf_prefix}.mlp.down_proj.weight": loaded[f"{prefix}.feed_forward.w2.weight"],
         f"{hf_prefix}.mlp.up_proj.weight": loaded[f"{prefix}.feed_forward.w3.weight"],
-        f"{hf_prefix}.input_layernorm.weight": loaded[f"{prefix}.attention_norm.weight"],
-        f"{hf_prefix}.post_attention_layernorm.weight": loaded[f"{prefix}.feed_forward_norm.weight"],
+        f"{hf_prefix}.input_layernorm.weight": _required_any(
+            loaded,
+            [
+                f"{prefix}.fla_norm.weight",
+                f"{prefix}.attention_norm.weight",
+            ],
+        ),
+        f"{hf_prefix}.post_attention_layernorm.weight": _required_any(
+            loaded,
+            [
+                f"{prefix}.feed_forward_norm.weight",
+                f"{prefix}.post_attention_norm.weight",
+            ],
+        ),
         f"{hf_prefix}.linear_attn.A_log": _module_weight(loaded, layer_i, "A_log"),
         f"{hf_prefix}.linear_attn.dt_bias": _module_weight(loaded, layer_i, "dt_bias"),
         f"{hf_prefix}.linear_attn.q_proj.weight": _module_weight(loaded, layer_i, "w_q.weight"),
