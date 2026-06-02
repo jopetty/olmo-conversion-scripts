@@ -81,6 +81,19 @@ DTYPE_MAP = {
 }
 
 
+def _get_tokenizer_config(config: dict[str, Any]) -> dict[str, Any]:
+    if "dataset" in config:
+        return config["dataset"]["tokenizer"]
+
+    instance_sources = config.get("instance_sources", [])
+    for instance_source in instance_sources:
+        for source in instance_source.get("sources", []):
+            if "tokenizer" in source:
+                return source["tokenizer"]
+
+    raise KeyError("Could not find tokenizer config under 'dataset.tokenizer' or 'instance_sources'.")
+
+
 def strtobool(val):
     """Convert a string representation of truth to True or False."""
     if isinstance(val, bool):
@@ -425,7 +438,7 @@ def write_model(
     olmo_config = json.loads(config_path.read_text())
     model_config = olmo_config["model"]
     block_config = model_config["block"]
-    tokenizer_config = olmo_config["dataset"]["tokenizer"]
+    tokenizer_config = _get_tokenizer_config(olmo_config)
 
     n_layers = model_config["n_layers"]
     dim = model_config["d_model"]
