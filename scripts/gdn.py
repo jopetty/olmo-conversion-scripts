@@ -512,9 +512,21 @@ def _layer_state_dict(loaded: dict[str, torch.Tensor], layer_i: int) -> dict[str
         f"model.layers.{layer_i}.mlp.gate_proj.weight": _required(loaded, f"{prefix}.feed_forward.w1.weight"),
         f"model.layers.{layer_i}.mlp.down_proj.weight": _required(loaded, f"{prefix}.feed_forward.w2.weight"),
         f"model.layers.{layer_i}.mlp.up_proj.weight": _required(loaded, f"{prefix}.feed_forward.w3.weight"),
-        f"model.layers.{layer_i}.input_layernorm.weight": _required(loaded, f"{prefix}.attention_norm.weight"),
-        f"model.layers.{layer_i}.post_attention_layernorm.weight": _required(
-            loaded, f"{prefix}.feed_forward_norm.weight"
+        f"model.layers.{layer_i}.input_layernorm.weight": _required_any(
+            loaded,
+            [
+                f"{prefix}.fla_norm.weight",
+                f"{prefix}.attention_norm.weight",
+                f"{prefix}.sequence_mixer_norm.weight",
+            ],
+        ),
+        f"model.layers.{layer_i}.post_attention_layernorm.weight": _required_any(
+            loaded,
+            [
+                f"{prefix}.feed_forward_norm.weight",
+                f"{prefix}.post_attention_norm.weight",
+                f"{prefix}.ffn_norm.weight",
+            ],
         ),
         f"model.layers.{layer_i}.linear_attn.A_log": _gdn_required(loaded, layer_i, "A_log"),
         f"model.layers.{layer_i}.linear_attn.dt_bias": _gdn_required(loaded, layer_i, "dt_bias"),
