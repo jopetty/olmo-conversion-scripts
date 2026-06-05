@@ -414,7 +414,19 @@ def _required_any(loaded: dict[str, torch.Tensor], keys: list[str]) -> torch.Ten
     for key in keys:
         if key in loaded:
             return loaded[key]
-    raise KeyError(f"Missing expected OLMo Core checkpoint key. Tried: {keys}")
+
+    layer_prefix = None
+    for key in keys:
+        parts = key.split(".")
+        if len(parts) >= 2 and parts[0] == "blocks" and parts[1].isdigit():
+            layer_prefix = f"blocks.{parts[1]}."
+            break
+    hint = ""
+    if layer_prefix is not None:
+        layer_keys = [loaded_key for loaded_key in loaded if loaded_key.startswith(layer_prefix)]
+        hint = f" Layer keys: {layer_keys[:40]}"
+
+    raise KeyError(f"Missing expected OLMo Core checkpoint key. Tried: {keys}.{hint}")
 
 
 def _gdn_required(loaded: dict[str, torch.Tensor], layer_i: int, suffix: str) -> torch.Tensor:
@@ -426,6 +438,24 @@ def _gdn_required(loaded: dict[str, torch.Tensor], layer_i: int, suffix: str) ->
             f"blocks.{layer_i}.sequence_mixer.inner.{suffix}",
             f"blocks.{layer_i}.fla.{suffix}",
             f"blocks.{layer_i}.fla.inner.{suffix}",
+        ],
+    )
+
+
+def _gdn_weight(loaded: dict[str, torch.Tensor], layer_i: int, olmo_suffix: str, hf_suffix: str) -> torch.Tensor:
+    return _required_any(
+        loaded,
+        [
+            f"blocks.{layer_i}.attention.{olmo_suffix}",
+            f"blocks.{layer_i}.sequence_mixer.{olmo_suffix}",
+            f"blocks.{layer_i}.sequence_mixer.inner.{olmo_suffix}",
+            f"blocks.{layer_i}.fla.{olmo_suffix}",
+            f"blocks.{layer_i}.fla.inner.{olmo_suffix}",
+            f"blocks.{layer_i}.attention.{hf_suffix}",
+            f"blocks.{layer_i}.sequence_mixer.{hf_suffix}",
+            f"blocks.{layer_i}.sequence_mixer.inner.{hf_suffix}",
+            f"blocks.{layer_i}.fla.{hf_suffix}",
+            f"blocks.{layer_i}.fla.inner.{hf_suffix}",
         ],
     )
 
@@ -530,13 +560,27 @@ def _layer_state_dict(loaded: dict[str, torch.Tensor], layer_i: int) -> dict[str
         ),
         f"model.layers.{layer_i}.linear_attn.A_log": _gdn_required(loaded, layer_i, "A_log"),
         f"model.layers.{layer_i}.linear_attn.dt_bias": _gdn_required(loaded, layer_i, "dt_bias"),
-        f"model.layers.{layer_i}.linear_attn.q_proj.weight": _gdn_required(loaded, layer_i, "w_q.weight"),
-        f"model.layers.{layer_i}.linear_attn.k_proj.weight": _gdn_required(loaded, layer_i, "w_k.weight"),
-        f"model.layers.{layer_i}.linear_attn.v_proj.weight": _gdn_required(loaded, layer_i, "w_v.weight"),
-        f"model.layers.{layer_i}.linear_attn.a_proj.weight": _gdn_required(loaded, layer_i, "w_a.weight"),
-        f"model.layers.{layer_i}.linear_attn.b_proj.weight": _gdn_required(loaded, layer_i, "w_b.weight"),
-        f"model.layers.{layer_i}.linear_attn.g_proj.weight": _gdn_required(loaded, layer_i, "w_g.weight"),
-        f"model.layers.{layer_i}.linear_attn.o_proj.weight": _gdn_required(loaded, layer_i, "w_out.weight"),
+        f"model.layers.{layer_i}.linear_attn.q_proj.weight": _gdn_weight(
+            loaded, layer_i, "w_q.weight", "q_proj.weight"
+        ),
+        f"model.layers.{layer_i}.linear_attn.k_proj.weight": _gdn_weight(
+            loaded, layer_i, "w_k.weight", "k_proj.weight"
+        ),
+        f"model.layers.{layer_i}.linear_attn.v_proj.weight": _gdn_weight(
+            loaded, layer_i, "w_v.weight", "v_proj.weight"
+        ),
+        f"model.layers.{layer_i}.linear_attn.a_proj.weight": _gdn_weight(
+            loaded, layer_i, "w_a.weight", "a_proj.weight"
+        ),
+        f"model.layers.{layer_i}.linear_attn.b_proj.weight": _gdn_weight(
+            loaded, layer_i, "w_b.weight", "b_proj.weight"
+        ),
+        f"model.layers.{layer_i}.linear_attn.g_proj.weight": _gdn_weight(
+            loaded, layer_i, "w_g.weight", "g_proj.weight"
+        ),
+        f"model.layers.{layer_i}.linear_attn.o_proj.weight": _gdn_weight(
+            loaded, layer_i, "w_out.weight", "o_proj.weight"
+        ),
         f"model.layers.{layer_i}.linear_attn.q_conv1d.weight": _conv_weight_for_hf(
             _gdn_required(loaded, layer_i, "q_conv1d.weight")
         ),
