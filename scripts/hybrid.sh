@@ -58,7 +58,7 @@ fi
 INPUT_DIR="${SOURCE_BASE_DIR}/${MODEL}/${SIZE}/step${STEP}"
 OUTPUT_DIR="${TARGET_BASE_DIR}/${MODEL}/${SIZE}/step${STEP}"
 
-TRUST_REMOTE_CODE=True uv run python yashas_hybrid.py \
+TRUST_REMOTE_CODE=True uv run python scripts/hybrid.py \
     --input_dir "$INPUT_DIR" \
     --output_dir "$OUTPUT_DIR" \
     --tokenizer allenai/Olmo-Hybrid-7B

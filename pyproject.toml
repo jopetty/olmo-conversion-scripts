@@ -15,4 +15,5 @@ transformers = { git = "https://github.com/YashasSamaga/transformers.git", rev =
 [dependency-groups]
 dev = [
     "ruff>=0.15.16",
+    "ty>=0.0.44",
 ]

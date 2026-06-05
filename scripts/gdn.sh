@@ -4,19 +4,17 @@ set -euo pipefail
 SOURCE_BASE_DIR="/weka/oe-training-default/ai2-llm/model-ladders"
 TARGET_BASE_DIR="/weka/oe-training-default/ai2-llm/checkpoints/jacksonp"
 
-MODEL="olmo3-baseline-jacksonp"
+MODEL="pure-gdn-ladder-gate-neg-eig"
 SIZE="1B"
 STEP=""
-
-# STEPS_A = [0, 7320, 8134, 15454, 16268, 30910, 32537, 61819, 65073, 123639, 130000, 130147]
 
 usage() {
     cat <<EOF
 Usage: $0 --model MODEL --size SIZE --step STEP
 
 Examples:
-  $0 --model olmo3-baseline-jacksonp --size 1B --step 0
-  $0 --model olmo3-baseline-jacksonp --size 60M --step 1000
+  $0 --model pure-gdn-ladder-gate-neg-eig --size 1B --step 0
+  $0 --model pure-gdn-ladder-gate-neg-eig --size 60M --step 1000
 EOF
 }
 
@@ -60,6 +58,6 @@ fi
 INPUT_DIR="${SOURCE_BASE_DIR}/${MODEL}/${SIZE}/step${STEP}"
 OUTPUT_DIR="${TARGET_BASE_DIR}/${MODEL}/${SIZE}/step${STEP}"
 
-TRUST_REMOTE_CODE=True uv run python scripts/transformer.py \
+TRUST_REMOTE_CODE=True uv run python scripts/gdn.py \
     --input_dir "$INPUT_DIR" \
     --output_dir "$OUTPUT_DIR"
