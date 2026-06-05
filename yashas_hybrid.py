@@ -789,7 +789,7 @@ def _write_tokenizer(
     tokenizer.bos_token_id = tokenizer_config.get("bos_token_id")
     tokenizer.eos_token_id = tokenizer_config.get("eos_token_id")
     tokenizer.save_pretrained(output_path)
-    print(f"  Tokenizer saved. Verify pretokenizer with: tokenizer.backend_tokenizer.pre_tokenizer")
+    print("  Tokenizer saved. Verify pretokenizer with: tokenizer.backend_tokenizer.pre_tokenizer")
 
 
 def main():

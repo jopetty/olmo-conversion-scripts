@@ -11,3 +11,8 @@ dependencies = [
 
 [tool.uv.sources]
 transformers = { git = "https://github.com/YashasSamaga/transformers.git", rev = "hybrid-small-suite" }
+
+[dependency-groups]
+dev = [
+    "ruff>=0.15.16",
+]

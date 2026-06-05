@@ -80,6 +80,37 @@ def write_json(text, path):
         json.dump(text, f)
 
 
+def get_tokenizer_config(config: dict[str, Any]) -> dict[str, Any]:
+    for instance_source in config["instance_sources"]:
+        for source in instance_source["sources"]:
+            if "tokenizer" in source:
+                return source["tokenizer"]
+    raise KeyError("Could not find tokenizer config in instance_sources.")
+
+
+def get_max_sequence_length(config: dict[str, Any]) -> int:
+    return config["instance_sources"][0]["sequence_length"]
+
+
+def get_layer_types(attention_config: dict[str, Any], n_layers: int) -> list[str]:
+    sliding_window_config = attention_config.get("sliding_window")
+    if sliding_window_config is None:
+        return ["full_attention"] * n_layers
+
+    pattern = sliding_window_config["pattern"]
+    layer_types = [
+        "full_attention" if pattern[layer_i % len(pattern)] == -1 else "sliding_attention"
+        for layer_i in range(n_layers)
+    ]
+
+    if sliding_window_config.get("force_full_attention_on_first_layer", False):
+        layer_types[0] = "full_attention"
+    if sliding_window_config.get("force_full_attention_on_last_layer", False):
+        layer_types[-1] = "full_attention"
+
+    return layer_types
+
+
 def normalize_path(path: Path | str) -> str:
     return str(path).rstrip("/").replace("file://", "")
 
@@ -302,8 +333,8 @@ def write_model(
     olmo3_config = json.loads(config_path.read_text())
     model_config = olmo3_config["model"]
     block_config = model_config["block"]
-    attention_config = block_config["attention"]
-    tokenizer_config = olmo3_config["dataset"]["tokenizer"]
+    attention_config = block_config["sequence_mixer"]
+    tokenizer_config = get_tokenizer_config(olmo3_config)
 
     n_layers = model_config["n_layers"]
     n_heads = attention_config["n_heads"]
@@ -311,12 +342,17 @@ def write_model(
     dims_per_head = dim // n_heads
     base = attention_config["rope"]["theta"]
     inv_freq = 1.0 / (base ** (torch.arange(0, dims_per_head, 2).float() / dims_per_head))
-    max_position_embeddings = olmo3_config["train_module"]["max_sequence_length"]
+    max_position_embeddings = get_max_sequence_length(olmo3_config)
 
     if attention_config.get("n_kv_heads", None) is not None:
-        num_key_value_heads = model_config["n_kv_heads"]  # for GQA / MQA
+        num_key_value_heads = attention_config["n_kv_heads"]  # for GQA / MQA
     else:
         num_key_value_heads = n_heads
+
+    sliding_window = None
+    if attention_config.get("sliding_window") is not None:
+        sliding_window = max(window for window in attention_config["sliding_window"]["pattern"] if window != -1)
+    layer_types = get_layer_types(attention_config, n_layers)
 
     print(f"Fetching all parameters from the checkpoint at {input_base_path}.")
 
@@ -389,6 +425,8 @@ def write_model(
         tie_word_embeddings=False,
         rms_norm_eps=block_config["layer_norm"]["eps"],
         rope_theta=base,
+        sliding_window=sliding_window,
+        layer_types=layer_types,
     )
     config.save_pretrained(tmp_model_path)
 
