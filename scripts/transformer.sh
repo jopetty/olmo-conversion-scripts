@@ -8,6 +8,8 @@ MODEL="olmo3-baseline-jacksonp"
 SIZE="1B"
 STEP=""
 
+# STEPS_A = [0, 7320, 8134, 15454, 16268, 30910, 32537, 61819, 65073, 123639, 130000, 130147]
+
 usage() {
     cat <<EOF
 Usage: $0 --model MODEL --size SIZE --step STEP
