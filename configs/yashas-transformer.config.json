@@ -1,0 +1,424 @@
+{
+  "run_name": "hybrid-small-transformer-275M",
+  "launch": {
+    "name": "hybrid-small-transformer-275M-train-e7aa5692",
+    "cmd": [
+      "src/scripts/train/hybrid-small-suite/pretraining.py",
+      "train",
+      "hybrid-small-transformer-275M",
+      "ai2/jupiter",
+      "--launch.num_nodes=4",
+      "--launch.budget=ai2/oe-other",
+      "--launch.priority=urgent"
+    ],
+    "budget": "ai2/oe-other",
+    "task_name": "train",
+    "workspace": "ai2/linear-rnns",
+    "beaker_image": "tylerr/olmo-core-tch291cu128-2025-11-25",
+    "num_nodes": 4,
+    "num_gpus": 8,
+    "shared_memory": "10GiB",
+    "clusters": ["ai2/jupiter"],
+    "shared_filesystem": true,
+    "priority": "urgent",
+    "preemptible": true,
+    "env_vars": [
+      { "name": "NCCL_DEBUG", "value": "INFO", "_CLASS_": "olmo_core.launch.beaker.BeakerEnvVar" }
+    ],
+    "env_secrets": [
+      {
+        "name": "BEAKER_TOKEN",
+        "secret": "YASHASBLS_BEAKER_TOKEN",
+        "required": true,
+        "_CLASS_": "olmo_core.launch.beaker.BeakerEnvSecret"
+      },
+      {
+        "name": "WANDB_API_KEY",
+        "secret": "YASHASBLS_WANDB_API_KEY",
+        "required": true,
+        "_CLASS_": "olmo_core.launch.beaker.BeakerEnvSecret"
+      },
+      {
+        "name": "COMET_API_KEY",
+        "secret": "YASHASBLS_COMET_API_KEY",
+        "required": false,
+        "_CLASS_": "olmo_core.launch.beaker.BeakerEnvSecret"
+      },
+      {
+        "name": "R2_ENDPOINT_URL",
+        "secret": "R2_ENDPOINT_URL",
+        "required": false,
+        "_CLASS_": "olmo_core.launch.beaker.BeakerEnvSecret"
+      },
+      {
+        "name": "WEKA_ENDPOINT_URL",
+        "secret": "WEKA_ENDPOINT_URL",
+        "required": false,
+        "_CLASS_": "olmo_core.launch.beaker.BeakerEnvSecret"
+      },
+      {
+        "name": "SLACK_WEBHOOK_URL",
+        "secret": "SLACK_WEBHOOK_URL",
+        "required": false,
+        "_CLASS_": "olmo_core.launch.beaker.BeakerEnvSecret"
+      }
+    ],
+    "google_credentials_secret": "GOOGLE_CREDENTIALS",
+    "aws_config_secret": "YASHASBLS_AWS_CONFIG",
+    "aws_credentials_secret": "YASHASBLS_AWS_CREDENTIALS",
+    "weka_buckets": [
+      {
+        "bucket": "oe-training-default",
+        "mount": "/weka/oe-training-default",
+        "_CLASS_": "olmo_core.launch.beaker.BeakerWekaBucket"
+      }
+    ],
+    "allow_dirty": false,
+    "git": {
+      "repo": "YashasSamaga/OLMo-core",
+      "repo_url": "https://github.com/YashasSamaga/OLMo-core",
+      "ref": "1a87f8ccb5c5678dac920b6ac4f74a2beac777eb",
+      "_CLASS_": "gantry.git_utils.GitRepoState"
+    },
+    "result_dir": "/results",
+    "system_python": true,
+    "num_execution_units": 1,
+    "follow": true,
+    "launch_timeout": 300,
+    "step_soft_timeout": 600,
+    "_CLASS_": "olmo_core.launch.beaker.BeakerLaunchConfig"
+  },
+  "model": {
+    "d_model": 640,
+    "vocab_size": 100352,
+    "n_layers": 10,
+    "block": {
+      "sequence_mixer": {
+        "name": "default",
+        "n_heads": 8,
+        "n_kv_heads": 8,
+        "head_dim": 128,
+        "bias": false,
+        "gate": {
+          "granularity": "elementwise",
+          "full_precision": true,
+          "_CLASS_": "olmo_core.nn.attention.GateConfig"
+        },
+        "qk_norm": {
+          "name": "rms",
+          "eps": 1e-6,
+          "bias": false,
+          "dtype": "float32",
+          "_CLASS_": "olmo_core.nn.layer_norm.LayerNormConfig"
+        },
+        "backend": "flash_3",
+        "dtype": "float32",
+        "use_head_qk_norm": true,
+        "_CLASS_": "olmo_core.nn.attention.AttentionConfig",
+        "type": "attention"
+      },
+      "layer_norm": {
+        "name": "rms",
+        "eps": 1e-6,
+        "bias": false,
+        "dtype": "float32",
+        "_CLASS_": "olmo_core.nn.layer_norm.LayerNormConfig"
+      },
+      "feed_forward": {
+        "hidden_size": 5120,
+        "name": "default",
+        "bias": false,
+        "dtype": "float32",
+        "activation": "silu",
+        "_CLASS_": "olmo_core.nn.feed_forward.FeedForwardConfig"
+      },
+      "name": "peri_norm",
+      "_CLASS_": "olmo_core.nn.transformer.config.TransformerBlockConfig"
+    },
+    "lm_head": {
+      "name": "default",
+      "layer_norm": {
+        "name": "rms",
+        "eps": 1e-6,
+        "bias": false,
+        "dtype": "float32",
+        "_CLASS_": "olmo_core.nn.layer_norm.LayerNormConfig"
+      },
+      "bias": false,
+      "dtype": "float32",
+      "loss_implementation": "default",
+      "_CLASS_": "olmo_core.nn.lm_head.LMHeadConfig"
+    },
+    "embedding_norm": {
+      "name": "rms",
+      "eps": 1e-6,
+      "bias": false,
+      "_CLASS_": "olmo_core.nn.layer_norm.LayerNormConfig"
+    },
+    "name": "default",
+    "dtype": "float32",
+    "init_method": "normal",
+    "init_seed": 0,
+    "init_std": 0.02,
+    "embed_scale": 25.298221281347036,
+    "_CLASS_": "olmo_core.nn.transformer.config.TransformerConfig"
+  },
+  "dataset": {
+    "tokenizer": {
+      "vocab_size": 100278,
+      "eos_token_id": 100257,
+      "pad_token_id": 100277,
+      "identifier": "allenai/dolma2-tokenizer",
+      "_CLASS_": "olmo_core.data.tokenizer.TokenizerConfig"
+    },
+    "mix": "OLMo-mix-0925",
+    "mix_base_dir": "gs://ai2-llm",
+    "expand_glob": false,
+    "include_instance_metadata": true,
+    "instance_filter_config": {
+      "repetition_max_period": 13,
+      "repetition_min_period": 1,
+      "repetition_max_count": 32,
+      "_CLASS_": "olmo_core.data.numpy_dataset.InstanceFilterConfig"
+    },
+    "work_dir": "/weka/oe-training-default/ai2-llm/checkpoints/yashasbls/dataset-cache",
+    "ignore_fingerprint_mismatch": false,
+    "sequence_length": 8192,
+    "max_target_sequence_length": 8192,
+    "generate_doc_lengths": false,
+    "_CLASS_": "olmo_core.data.numpy_dataset.NumpyFSLDatasetConfig"
+  },
+  "data_loader": {
+    "global_batch_size": 2621440,
+    "seed": 34521,
+    "num_workers": 8,
+    "ignore_fingerprint_mismatch": false,
+    "_CLASS_": "olmo_core.data.data_loader.NumpyDataLoaderConfig",
+    "type": "numpy"
+  },
+  "train_module": {
+    "rank_microbatch_size": 40960,
+    "max_sequence_length": 8192,
+    "optim": {
+      "group_overrides": [
+        {
+          "params": ["embeddings.weight"],
+          "opts": { "weight_decay": 0.0 },
+          "_CLASS_": "olmo_core.optim.config.OptimGroupOverride"
+        }
+      ],
+      "compile": false,
+      "fixed_fields": ["initial_lr"],
+      "lr": 0.008,
+      "betas": [0.9, 0.95],
+      "eps": 1e-8,
+      "weight_decay": 0.1,
+      "foreach": true,
+      "step_increment_bugfix": true,
+      "rolling_interval_length": 128,
+      "sigma_factor": 6,
+      "_CLASS_": "olmo_core.optim.adamw.SkipStepAdamWConfig",
+      "type": "skip_step_adamw"
+    },
+    "max_grad_norm": 1.0,
+    "scheduler": {
+      "lr_field": "lr",
+      "initial_lr_field": "initial_lr",
+      "units": "steps",
+      "warmup": 2000,
+      "alpha_f": 0.1,
+      "warmup_min_lr": 0.0,
+      "decay": 2000,
+      "decay_min_lr": 0.0,
+      "_CLASS_": "olmo_core.optim.scheduler.CosWithWarmupAndLinearDecay",
+      "type": "cos_with_warmup_and_linear_decay"
+    },
+    "compile_model": true,
+    "float8_config": { "enabled": false, "_CLASS_": "olmo_core.float8.Float8Config" },
+    "dp_config": {
+      "name": "hsdp",
+      "param_dtype": "bfloat16",
+      "reduce_dtype": "float32",
+      "wrapping_strategy": "full",
+      "prefetch_factor": 0,
+      "_CLASS_": "olmo_core.train.train_module.transformer.config.TransformerDataParallelConfig"
+    },
+    "ac_config": {
+      "mode": "budget",
+      "activation_memory_budget": 1.0,
+      "_CLASS_": "olmo_core.train.train_module.transformer.config.TransformerActivationCheckpointingConfig"
+    },
+    "z_loss_multiplier": 1e-5,
+    "label_ignore_index": -100,
+    "_CLASS_": "olmo_core.train.train_module.transformer.config.TransformerTrainModuleConfig"
+  },
+  "trainer": {
+    "save_folder": "/weka/oe-training-default/ai2-llm/checkpoints/yashasbls/hybrid-small-transformer-275M",
+    "work_dir": "/weka/oe-training-default/ai2-llm/checkpoints/yashasbls/dataset-cache",
+    "load_strategy": "if_available",
+    "checkpointer": {
+      "pre_download": false,
+      "throttle_uploads": false,
+      "_CLASS_": "olmo_core.train.checkpoint.CheckpointerConfig"
+    },
+    "save_overwrite": true,
+    "max_duration": {
+      "value": 422536960000,
+      "unit": "tokens",
+      "_CLASS_": "olmo_core.train.common.Duration"
+    },
+    "cancel_check_interval": 1000,
+    "metrics_collect_interval": 10,
+    "callbacks": {
+      "checkpointer": {
+        "save_interval": 1000,
+        "save_async": true,
+        "remove": "ephemeral_only",
+        "enabled": true,
+        "_CLASS_": "olmo_core.train.callbacks.checkpointer.CheckpointerCallback"
+      },
+      "speed_monitor": {
+        "_CLASS_": "olmo_core.train.callbacks.speed_monitor.SpeedMonitorCallback"
+      },
+      "wandb": {
+        "enabled": true,
+        "name": "hybrid-small-transformer-275M-20260617T000608+0000",
+        "project": "hybrid-small-suite",
+        "entity": "ai2-llm",
+        "group": "hybrid-small-transformer-275M",
+        "tags": ["pretraining", "275m"],
+        "cancel_tags": ["cancel", "canceled", "cancelled"],
+        "cancel_check_interval": 1000,
+        "_CLASS_": "olmo_core.train.callbacks.wandb.WandBCallback"
+      },
+      "downstream_evaluator": {
+        "tasks": [
+          "arc_challenge_test_bpb_5shot",
+          "arc_challenge_test_mc_5shot_fast",
+          "arc_easy_test_bpb_5shot",
+          "arc_easy_test_mc_5shot_fast",
+          "basic_skills_arithmetic_rc_5shot",
+          "basic_skills_coding_rc_5shot",
+          "basic_skills_common_knowledge_rc_5shot",
+          "basic_skills_logical_reasoning_rc_5shot",
+          "basic_skills_pattern_rc_5shot",
+          "basic_skills_string_operations_rc_5shot",
+          "codex_humaneval_gold_bpb_3shot",
+          "codex_mbpp_gold_bpb_3shot",
+          "copycolors_10way_fast",
+          "hellaswag_bpb_5shot",
+          "minerva_math_500_gold_bpb_0shot",
+          "mmlu_humanities_test_bpb_5shot",
+          "mmlu_humanities_test_mc_5shot_fast",
+          "mmlu_other_test_bpb_5shot",
+          "mmlu_other_test_mc_5shot_fast",
+          "mmlu_social_sciences_test_bpb_5shot",
+          "mmlu_social_sciences_test_mc_5shot_fast",
+          "mmlu_stem_test_bpb_5shot",
+          "mmlu_stem_test_mc_5shot_fast",
+          "mt_mbpp_cpp_gold_bpb_3shot",
+          "mt_mbpp_java_gold_bpb_3shot",
+          "mt_mbpp_rust_gold_bpb_3shot"
+        ],
+        "tokenizer": {
+          "vocab_size": 100278,
+          "eos_token_id": 100257,
+          "pad_token_id": 100277,
+          "identifier": "allenai/dolma2-tokenizer",
+          "_CLASS_": "olmo_core.data.tokenizer.TokenizerConfig"
+        },
+        "eval_interval": 10000,
+        "eval_duration": {
+          "value": 1,
+          "unit": "epochs",
+          "_CLASS_": "olmo_core.train.common.Duration"
+        },
+        "eval_on_startup": false,
+        "eval_on_finish": true,
+        "cancel_after_first_eval": false,
+        "log_interval": 5,
+        "lazy": false,
+        "enabled": true,
+        "_CLASS_": "olmo_core.train.callbacks.evaluator_callback.DownstreamEvaluatorCallbackConfig"
+      },
+      "lm_evaluator": {
+        "eval_dataset": {
+          "tokenizer": {
+            "vocab_size": 100278,
+            "eos_token_id": 100257,
+            "pad_token_id": 100277,
+            "identifier": "allenai/dolma2-tokenizer",
+            "_CLASS_": "olmo_core.data.tokenizer.TokenizerConfig"
+          },
+          "mix": "v3-small-ppl-validation",
+          "mix_base_dir": "/weka/oe-training-default/ai2-llm",
+          "expand_glob": false,
+          "include_instance_metadata": true,
+          "work_dir": "/weka/oe-training-default/ai2-llm/checkpoints/yashasbls/dataset-cache",
+          "ignore_fingerprint_mismatch": false,
+          "sequence_length": 8192,
+          "_CLASS_": "olmo_core.data.numpy_dataset.NumpyPaddedFSLDatasetConfig"
+        },
+        "eval_interval": 10000,
+        "eval_on_startup": false,
+        "eval_on_finish": true,
+        "cancel_after_first_eval": false,
+        "eval_duration": {
+          "value": 1,
+          "unit": "epochs",
+          "_CLASS_": "olmo_core.train.common.Duration"
+        },
+        "log_interval": 5,
+        "enabled": true,
+        "_CLASS_": "olmo_core.train.callbacks.evaluator_callback.LMEvaluatorCallbackConfig"
+      },
+      "config_saver": {
+        "fname": "config.json",
+        "_CLASS_": "olmo_core.train.callbacks.config_saver.ConfigSaverCallback"
+      },
+      "profiler": {
+        "skip_first": 0,
+        "wait": 1,
+        "warmup": 5,
+        "active": 3,
+        "repeat": 1,
+        "with_stack": true,
+        "profile_memory": false,
+        "enable_cuda_sync_events": false,
+        "enabled": false,
+        "_CLASS_": "olmo_core.train.callbacks.profiler.ProfilerCallback"
+      },
+      "garbage_collector": {
+        "gc_interval": 1000,
+        "enabled": true,
+        "_CLASS_": "olmo_core.train.callbacks.garbage_collector.GarbageCollectorCallback"
+      },
+      "slack_notifier": {
+        "name": "hybrid-small-transformer-275M",
+        "notifications": "end_only",
+        "enabled": false,
+        "_CLASS_": "olmo_core.train.callbacks.slack_notifier.SlackNotifierCallback"
+      },
+      "gap_monitor": {
+        "enabled": false,
+        "interval": 1,
+        "_CLASS_": "olmo_core.train.callbacks.gap_monitor.GAPMonitorCallback"
+      },
+      "beaker": {
+        "enabled": true,
+        "result_dir": "/results",
+        "_CLASS_": "olmo_core.train.callbacks.beaker.BeakerCallback"
+      },
+      "gpu_monitor": {
+        "_CLASS_": "olmo_core.train.callbacks.gpu_memory_monitor.GPUMemoryMonitorCallback"
+      }
+    },
+    "bookkeeping_soft_timeout": 30,
+    "no_checkpoints": false,
+    "no_evals": false,
+    "_CLASS_": "olmo_core.train.config.TrainerConfig"
+  },
+  "init_seed": 12536,
+  "backend": "cpu:gloo,cuda:nccl",
+  "_CLASS_": "olmo_core.internal.experiment.ExperimentConfig"
+}
