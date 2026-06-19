@@ -9,9 +9,120 @@ from typing import Any, cast
 
 import torch
 from safetensors.torch import save_file
-from transformers import AutoTokenizer, OlmoHybridSmallConfig
+from transformers import AutoTokenizer
 
 from hybrid import DTYPE_MAP, load_model
+
+
+CONFIGURATION_CODE = '''from __future__ import annotations
+
+import math
+from typing import Any
+
+from transformers import PreTrainedConfig
+
+
+class YashasTransformerConfig(PreTrainedConfig):
+    model_type = "yashas_transformer"
+    keys_to_ignore_at_inference = ["past_key_values"]
+
+    def __init__(
+        self,
+        vocab_size: int = 100352,
+        hidden_size: int = 640,
+        intermediate_size: int = 5120,
+        num_hidden_layers: int = 10,
+        num_attention_heads: int = 8,
+        num_key_value_heads: int | None = 8,
+        hidden_act: str = "silu",
+        max_position_embeddings: int = 8192,
+        initializer_range: float = 0.02,
+        rms_norm_eps: float = 1e-6,
+        use_cache: bool = True,
+        pad_token_id: int | None = 100277,
+        bos_token_id: int | None = None,
+        eos_token_id: int | list[int] | None = 100257,
+        tie_word_embeddings: bool = False,
+        rope_parameters: dict[str, Any] | None = None,
+        attention_bias: bool = False,
+        attention_dropout: int | float | None = 0.0,
+        layer_types: list[str] | None = None,
+        embed_scale: float | None = None,
+        embedding_norm_eps: float = 1e-6,
+        use_attention_gate: bool = True,
+        use_head_qk_norm: bool = True,
+        head_dim: int = 128,
+        linear_num_key_heads: int | None = None,
+        linear_num_value_heads: int | None = None,
+        linear_key_head_dim: int | None = None,
+        linear_value_head_dim: int | None = None,
+        linear_a_log_min: float = 0.0,
+        linear_a_log_max: float = 16.0,
+        linear_dt_min: float = 0.001,
+        linear_dt_max: float = 0.1,
+        linear_dt_init_floor: float = 1e-4,
+        linear_conv_kernel_dim: int = 4,
+        linear_allow_neg_eigval: bool = True,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(
+            pad_token_id=pad_token_id,
+            bos_token_id=bos_token_id,
+            eos_token_id=eos_token_id,
+            tie_word_embeddings=tie_word_embeddings,
+            **kwargs,
+        )
+        self.vocab_size = vocab_size
+        self.hidden_size = hidden_size
+        self.intermediate_size = intermediate_size
+        self.num_hidden_layers = num_hidden_layers
+        self.num_attention_heads = num_attention_heads
+        self.num_key_value_heads = num_key_value_heads or num_attention_heads
+        self.hidden_act = hidden_act
+        self.max_position_embeddings = max_position_embeddings
+        self.initializer_range = initializer_range
+        self.rms_norm_eps = rms_norm_eps
+        self.use_cache = use_cache
+        self.rope_parameters = rope_parameters
+        self.attention_bias = attention_bias
+        self.attention_dropout = attention_dropout
+        self.layer_types = layer_types or ["full_attention"] * num_hidden_layers
+        self.embed_scale = embed_scale if embed_scale is not None else math.sqrt(hidden_size)
+        self.embedding_norm_eps = embedding_norm_eps
+        self.use_attention_gate = use_attention_gate
+        self.use_head_qk_norm = use_head_qk_norm
+        self.head_dim = head_dim
+        self.linear_num_key_heads = linear_num_key_heads or num_attention_heads
+        self.linear_num_value_heads = linear_num_value_heads or num_attention_heads
+        self.linear_key_head_dim = linear_key_head_dim or head_dim
+        self.linear_value_head_dim = linear_value_head_dim or 2 * self.linear_key_head_dim
+        self.linear_a_log_min = linear_a_log_min
+        self.linear_a_log_max = linear_a_log_max
+        self.linear_dt_min = linear_dt_min
+        self.linear_dt_max = linear_dt_max
+        self.linear_dt_init_floor = linear_dt_init_floor
+        self.linear_conv_kernel_dim = linear_conv_kernel_dim
+        self.linear_allow_neg_eigval = linear_allow_neg_eigval
+'''
+
+
+MODELING_CODE = '''from __future__ import annotations
+
+from transformers.models.olmo_hybrid_small.modeling_olmo_hybrid_small import (
+    OlmoHybridSmallForCausalLM,
+    OlmoHybridSmallModel,
+)
+
+from .configuration_yashas_transformer import YashasTransformerConfig
+
+
+class YashasTransformerModel(OlmoHybridSmallModel):
+    config_class = YashasTransformerConfig
+
+
+class YashasTransformerForCausalLM(OlmoHybridSmallForCausalLM):
+    config_class = YashasTransformerConfig
+'''
 
 
 def _get_tokenizer_config(config: dict[str, Any]) -> dict[str, Any]:
@@ -121,6 +232,65 @@ def _patch_nope_config(model_path: str) -> None:
     print("Patched config.json: rope_parameters={'rope_theta': null} (NoPE)")
 
 
+def _write_custom_model_code(model_path: str) -> None:
+    output_path = Path(model_path)
+    (output_path / "configuration_yashas_transformer.py").write_text(CONFIGURATION_CODE)
+    (output_path / "modeling_yashas_transformer.py").write_text(MODELING_CODE)
+
+
+def _write_config(
+    model_path: str,
+    model_config: dict[str, Any],
+    block_config: dict[str, Any],
+    attention_config: dict[str, Any],
+    feed_forward_config: dict[str, Any],
+    tokenizer_config: dict[str, Any],
+    max_sequence_length: int,
+) -> None:
+    n_layers = model_config["n_layers"]
+    dim = model_config["d_model"]
+    n_heads = attention_config["n_heads"]
+    head_dim = attention_config.get("head_dim", dim // n_heads)
+
+    config_dict = {
+        "architectures": ["YashasTransformerForCausalLM"],
+        "auto_map": {
+            "AutoConfig": "configuration_yashas_transformer.YashasTransformerConfig",
+            "AutoModel": "modeling_yashas_transformer.YashasTransformerModel",
+            "AutoModelForCausalLM": "modeling_yashas_transformer.YashasTransformerForCausalLM",
+        },
+        "model_type": "yashas_transformer",
+        "vocab_size": model_config["vocab_size"],
+        "hidden_size": dim,
+        "intermediate_size": feed_forward_config["hidden_size"],
+        "num_hidden_layers": n_layers,
+        "num_attention_heads": n_heads,
+        "num_key_value_heads": attention_config.get("n_kv_heads", n_heads),
+        "head_dim": head_dim,
+        "hidden_act": feed_forward_config.get("activation", "silu"),
+        "max_position_embeddings": max_sequence_length,
+        "initializer_range": model_config.get("init_std", 0.02),
+        "rms_norm_eps": block_config.get("layer_norm", {}).get("eps", 1e-6),
+        "embedding_norm_eps": model_config.get("embedding_norm", {}).get("eps", 1e-6),
+        "embed_scale": model_config.get("embed_scale"),
+        "use_attention_gate": attention_config.get("gate") is not None,
+        "use_head_qk_norm": attention_config.get("use_head_qk_norm", True),
+        "attention_bias": attention_config.get("bias", False),
+        "attention_dropout": attention_config.get("dropout", 0.0),
+        "pad_token_id": tokenizer_config.get("pad_token_id"),
+        "bos_token_id": tokenizer_config.get("bos_token_id"),
+        "eos_token_id": tokenizer_config.get("eos_token_id"),
+        "tie_word_embeddings": False,
+        "rope_parameters": {"rope_theta": None},
+        "layer_types": ["full_attention"] * n_layers,
+        "torch_dtype": "bfloat16",
+        "transformers_version": "5.8.0.dev0",
+    }
+
+    config_path = Path(model_path) / "config.json"
+    config_path.write_text(json.dumps(config_dict, indent=2))
+
+
 def write_model(
     model_path: str,
     input_base_path: str,
@@ -140,10 +310,6 @@ def write_model(
     tokenizer_config = _get_tokenizer_config(olmo_config)
 
     n_layers = model_config["n_layers"]
-    dim = model_config["d_model"]
-    n_heads = attention_config["n_heads"]
-    n_kv_heads = attention_config.get("n_kv_heads", n_heads)
-    head_dim = attention_config.get("head_dim", dim // n_heads)
     max_sequence_length = _get_max_sequence_length(olmo_config, max_sequence_length)
 
     print(f"Fetching all parameters from the checkpoint at {input_base_path}.")
@@ -170,25 +336,16 @@ def write_model(
     full_state_dict = {key: value.to(dtype) for key, value in full_state_dict.items()}
     print(f"Total parameters: {param_count}")
 
-    config = OlmoHybridSmallConfig(
-        vocab_size=model_config["vocab_size"],
-        hidden_size=dim,
-        intermediate_size=feed_forward_config["hidden_size"],
-        num_hidden_layers=n_layers,
-        num_attention_heads=n_heads,
-        num_key_value_heads=n_kv_heads,
-        head_dim=head_dim,
-        max_position_embeddings=max_sequence_length,
-        pad_token_id=tokenizer_config.get("pad_token_id"),
-        bos_token_id=tokenizer_config.get("bos_token_id"),
-        eos_token_id=tokenizer_config.get("eos_token_id"),
-        tie_word_embeddings=False,
-        rms_norm_eps=block_config.get("layer_norm", {}).get("eps", 1e-6),
-        layer_types=["full_attention"] * n_layers,
+    _write_custom_model_code(model_path)
+    _write_config(
+        model_path,
+        model_config,
+        block_config,
+        attention_config,
+        feed_forward_config,
+        tokenizer_config,
+        max_sequence_length,
     )
-    config.rope_parameters = {"rope_theta": None}
-    config.architectures = ["OlmoHybridSmallForCausalLM"]
-    config.save_pretrained(model_path)
 
     safetensors_path = os.path.join(model_path, "model.safetensors")
     save_file(full_state_dict, safetensors_path)
@@ -201,7 +358,6 @@ def write_model(
     if include_tokenizer:
         _write_tokenizer(model_path, tokenizer_id, tokenizer_config, max_sequence_length)
 
-    _patch_nope_config(model_path)
     print(f"Conversion complete. Model saved to {model_path}")
 
 
