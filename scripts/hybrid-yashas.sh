@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SOURCE_BASE_DIR="/weka/oe-training-default/ai2-llm/checkpoints/yashasbls/hybrid-small-275M-Cx100/"
+SOURCE_BASE_DIR="/weka/oe-training-default/ai2-llm/checkpoints/yashasbls/hybrid-small-275M-Cx100"
 TARGET_BASE_DIR="/weka/oe-training-default/ai2-llm/checkpoints/jacksonp"
 
 MODEL="hybrid-small-Cx100"
