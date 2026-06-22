@@ -12,19 +12,15 @@ CHINCHILLA=""
 
 usage() {
     cat <<EOF
-Usage: $0 --model MODEL --size SIZE --step STEP --mixin MIXIN --chinchilla CHINCHILLA
+Usage: $0 --size SIZE --step STEP --mixin MIXIN --chinchilla CHINCHILLA
 
 Examples:
-  $0 --model olmo3-hybrid-gdn-deux --size 1B --step 0 --mixin aperiodic_supervised_n10000_v26_a50_m64_z1p2_s3  --chinchilla 8
+  $0 --size 275M --step 0 --mixin aperiodic_supervised_n10000_v26_a50_m64_z1p2_s3  --chinchilla 8
 EOF
 }
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --model)
-            MODEL="$2"
-            shift 2
-            ;;
         --size)
             SIZE="$2"
             shift 2
@@ -53,7 +49,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-if [[ -z "$MODEL" || -z "$SIZE" || -z "$STEP" || -z "$MIXIN" || -z "$CHINCHILLA" ]]; then
+if [[ -z "$SIZE" || -z "$STEP" || -z "$MIXIN" || -z "$CHINCHILLA" ]]; then
     echo "Missing required argument." >&2
     usage >&2
     exit 1
@@ -65,7 +61,7 @@ if [[ ! "$STEP" =~ ^[0-9]+$ ]]; then
 fi
 
 INPUT_DIR="${SOURCE_BASE_DIR}/${SIZE}/hybrid/${MIXIN}/Cx${CHINCHILLA}/step${STEP}"
-OUTPUT_DIR="${TARGET_BASE_DIR}/${MODEL}-${MIXIN}-Cx${CHINCHILLA}/${SIZE}/step${STEP}"
+OUTPUT_DIR="${TARGET_BASE_DIR}/hybrid-${MIXIN}-Cx${CHINCHILLA}/${SIZE}/step${STEP}"
 
 TRUST_REMOTE_CODE=True uv run python scripts/hybrid.py \
     --input_dir "$INPUT_DIR" \
