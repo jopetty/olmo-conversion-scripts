@@ -82,16 +82,69 @@ DTYPE_MAP = {
 
 
 def _get_tokenizer_config(config: dict[str, Any]) -> dict[str, Any]:
-    if "dataset" in config:
+    if "dataset" in config and "tokenizer" in config["dataset"]:
         return config["dataset"]["tokenizer"]
 
-    instance_sources = config.get("instance_sources", [])
-    for instance_source in instance_sources:
-        for source in instance_source.get("sources", []):
-            if "tokenizer" in source:
-                return source["tokenizer"]
+    tokenizer_config = _find_config_value(config.get("instance_sources", []), "tokenizer")
+    if isinstance(tokenizer_config, dict):
+        return tokenizer_config
 
     raise KeyError("Could not find tokenizer config under 'dataset.tokenizer' or 'instance_sources'.")
+
+
+def _find_config_value(config: Any, key: str) -> Any | None:
+    if isinstance(config, dict):
+        if key in config:
+            return config[key]
+        for value in config.values():
+            result = _find_config_value(value, key)
+            if result is not None:
+                return result
+    elif isinstance(config, list):
+        for item in config:
+            result = _find_config_value(item, key)
+            if result is not None:
+                return result
+    return None
+
+
+def _find_config_values(config: Any, key: str) -> list[Any]:
+    if isinstance(config, dict):
+        values = [config[key]] if key in config else []
+        for value in config.values():
+            values.extend(_find_config_values(value, key))
+        return values
+    if isinstance(config, list):
+        values = []
+        for item in config:
+            values.extend(_find_config_values(item, key))
+        return values
+    return []
+
+
+def _get_max_sequence_length(config: dict[str, Any], override: int | None) -> int:
+    if override is not None:
+        return override
+
+    max_sequence_length = config.get("train_module", {}).get("max_sequence_length")
+    if max_sequence_length is not None:
+        return max_sequence_length
+
+    max_sequence_length = config.get("dataset", {}).get("sequence_length")
+    if max_sequence_length is not None:
+        return max_sequence_length
+
+    sequence_lengths = [
+        sequence_length
+        for sequence_length in _find_config_values(config.get("instance_sources", []), "sequence_length")
+        if isinstance(sequence_length, int)
+    ]
+    if sequence_lengths:
+        return max(sequence_lengths)
+
+    max_sequence_length = 8192
+    print(f"Warning: max_sequence_length not found in config or CLI, using default: {max_sequence_length}")
+    return max_sequence_length
 
 
 def strtobool(val):
@@ -597,18 +650,7 @@ def write_model(
     gdn_value_head_dim = int(gdn_head_dim * gdn_expand_v)
 
     # Resolve max_position_embeddings
-    if max_sequence_length is None:
-        max_sequence_length = olmo_config.get("train_module", {}).get("max_sequence_length")
-    if max_sequence_length is None:
-        max_sequence_length = olmo_config.get("dataset", {}).get("sequence_length")
-    if max_sequence_length is None:
-        instance_sources = olmo_config.get("instance_sources", [])
-        sequence_lengths = [source["sequence_length"] for source in instance_sources if "sequence_length" in source]
-        if sequence_lengths:
-            max_sequence_length = max(sequence_lengths)
-    if max_sequence_length is None:
-        max_sequence_length = 8192
-        print(f"Warning: max_sequence_length not found in config or CLI, using default: {max_sequence_length}")
+    max_sequence_length = _get_max_sequence_length(olmo_config, max_sequence_length)
 
     print(f"Fetching all parameters from the checkpoint at {input_base_path}.")
     loaded = load_model(os.path.join(input_base_path, "model_and_optim"))["model"]
