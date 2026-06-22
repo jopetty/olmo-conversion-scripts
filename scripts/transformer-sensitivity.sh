@@ -64,9 +64,6 @@ OUTPUT_DIR="${TARGET_BASE_DIR}/transformer-${MIXIN}-Cx${CHINCHILLA}/${SIZE}/step
 
 echo "Loading checkpoint from ${INPUT_DIR}"
 
-INPUT_DIR="${SOURCE_BASE_DIR}/${MODEL}/${SIZE}/step${STEP}"
-OUTPUT_DIR="${TARGET_BASE_DIR}/${MODEL}/${SIZE}/step${STEP}"
-
 TRUST_REMOTE_CODE=True uv run python scripts/transformer.py \
     --input_dir "$INPUT_DIR" \
     --output_dir "$OUTPUT_DIR" \
