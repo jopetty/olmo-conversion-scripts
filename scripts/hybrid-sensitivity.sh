@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SOURCE_BASE_DIR="/weka/oe-training-default/ai2-llm/model-ladders/sensitivity-ladder"
+TARGET_BASE_DIR="/weka/oe-training-default/ai2-llm/checkpoints/jacksonp"
+
+MODEL=""
+SIZE=""
+STEP=""
+MIXIN=""
+CHINCHILLA=""
+
+usage() {
+    cat <<EOF
+Usage: $0 --model MODEL --size SIZE --step STEP --mixin MIXIN --chinchilla CHINCHILLA
+
+Examples:
+  $0 --model olmo3-hybrid-gdn-deux --size 1B --step 0 --mixin aperiodic_supervised_n10000_v26_a50_m64_z1p2_s3  --chinchilla 8
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --model)
+            MODEL="$2"
+            shift 2
+            ;;
+        --size)
+            SIZE="$2"
+            shift 2
+            ;;
+        --step)
+            STEP="$2"
+            shift 2
+            ;;
+        --mixin)
+            MIXIN="$2"
+            shift 2
+            ;;
+        --chinchilla)
+            CHINCHILLA="$2"
+            shift 2
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "Unknown argument: $1" >&2
+            usage >&2
+            exit 1
+            ;;
+    esac
+done
+
+if [[ -z "$MODEL" || -z "$SIZE" || -z "$STEP" || -z "$MIXIN" || -z "$CHINCHILLA" ]]; then
+    echo "Missing required argument." >&2
+    usage >&2
+    exit 1
+fi
+
+if [[ ! "$STEP" =~ ^[0-9]+$ ]]; then
+    echo "--step must be an integer, got: $STEP" >&2
+    exit 1
+fi
+
+INPUT_DIR="${SOURCE_BASE_DIR}/${SIZE}/hybrid/${MIXIN}/Cx${CHINCHILLA}/step${STEP}"
+OUTPUT_DIR="${TARGET_BASE_DIR}/${MODEL}-${MIXIN}-Cx${CHINCHILLA}/${SIZE}/step${STEP}"
+
+TRUST_REMOTE_CODE=True uv run python scripts/hybrid.py \
+    --input_dir "$INPUT_DIR" \
+    --output_dir "$OUTPUT_DIR" \
+    --tokenizer allenai/Olmo-Hybrid-7B
