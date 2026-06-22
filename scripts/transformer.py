@@ -388,8 +388,13 @@ def write_model(
     n_heads = attention_config["n_heads"]
     dim = model_config["d_model"]
     dims_per_head = dim // n_heads
-    base = attention_config["rope"]["theta"]
-    inv_freq = 1.0 / (base ** (torch.arange(0, dims_per_head, 2).float() / dims_per_head))
+    rope_config = attention_config.get("rope")
+    rope_theta = rope_config["theta"] if rope_config is not None else None
+    inv_freq = (
+        1.0 / (rope_theta ** (torch.arange(0, dims_per_head, 2).float() / dims_per_head))
+        if rope_theta is not None
+        else None
+    )
     max_position_embeddings = get_max_sequence_length(olmo3_config)
 
     if attention_config.get("n_kv_heads", None) is not None:
@@ -433,7 +438,8 @@ def write_model(
             ],
         }
 
-        state_dict[f"model.layers.{layer_i}.self_attn.rotary_emb.inv_freq"] = inv_freq
+        if inv_freq is not None:
+            state_dict[f"model.layers.{layer_i}.self_attn.rotary_emb.inv_freq"] = inv_freq
 
         for k, v in state_dict.items():
             index_dict["weight_map"][k] = filename
@@ -472,7 +478,7 @@ def write_model(
         eos_token_id=tokenizer_config["eos_token_id"],
         tie_word_embeddings=False,
         rms_norm_eps=block_config["layer_norm"]["eps"],
-        rope_theta=base,
+        rope_theta=rope_theta,
         sliding_window=sliding_window,
         layer_types=layer_types,
     )
