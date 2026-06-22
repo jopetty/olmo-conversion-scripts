@@ -81,15 +81,63 @@ def write_json(text, path):
 
 
 def get_tokenizer_config(config: dict[str, Any]) -> dict[str, Any]:
-    for instance_source in config["instance_sources"]:
-        for source in instance_source["sources"]:
-            if "tokenizer" in source:
-                return source["tokenizer"]
+    if "dataset" in config and "tokenizer" in config["dataset"]:
+        return config["dataset"]["tokenizer"]
+
+    tokenizer_config = find_config_value(config.get("instance_sources", []), "tokenizer")
+    if isinstance(tokenizer_config, dict):
+        return tokenizer_config
     raise KeyError("Could not find tokenizer config in instance_sources.")
 
 
 def get_max_sequence_length(config: dict[str, Any]) -> int:
-    return config["instance_sources"][0]["sequence_length"]
+    max_sequence_length = config.get("train_module", {}).get("max_sequence_length")
+    if max_sequence_length is not None:
+        return max_sequence_length
+
+    max_sequence_length = config.get("dataset", {}).get("sequence_length")
+    if max_sequence_length is not None:
+        return max_sequence_length
+
+    sequence_lengths = [
+        sequence_length
+        for sequence_length in find_config_values(config.get("instance_sources", []), "sequence_length")
+        if isinstance(sequence_length, int)
+    ]
+    if sequence_lengths:
+        return max(sequence_lengths)
+
+    raise KeyError("Could not find sequence_length in config.")
+
+
+def find_config_value(config: Any, key: str) -> Any | None:
+    if isinstance(config, dict):
+        if key in config:
+            return config[key]
+        for value in config.values():
+            result = find_config_value(value, key)
+            if result is not None:
+                return result
+    elif isinstance(config, list):
+        for item in config:
+            result = find_config_value(item, key)
+            if result is not None:
+                return result
+    return None
+
+
+def find_config_values(config: Any, key: str) -> list[Any]:
+    if isinstance(config, dict):
+        values = [config[key]] if key in config else []
+        for value in config.values():
+            values.extend(find_config_values(value, key))
+        return values
+    if isinstance(config, list):
+        values = []
+        for item in config:
+            values.extend(find_config_values(item, key))
+        return values
+    return []
 
 
 def get_layer_types(attention_config: dict[str, Any], n_layers: int) -> list[str]:
