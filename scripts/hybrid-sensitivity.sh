@@ -63,6 +63,8 @@ fi
 INPUT_DIR="${SOURCE_BASE_DIR}/${SIZE}/hybrid/${MIXIN}/Cx${CHINCHILLA}/step${STEP}"
 OUTPUT_DIR="${TARGET_BASE_DIR}/hybrid-${MIXIN}-Cx${CHINCHILLA}/${SIZE}/step${STEP}"
 
+echo "Loading checkpoint from ${INPUT_DIR}"
+
 TRUST_REMOTE_CODE=True uv run python scripts/hybrid.py \
     --input_dir "$INPUT_DIR" \
     --output_dir "$OUTPUT_DIR" \
