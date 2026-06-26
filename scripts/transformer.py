@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import gc
+import inspect
 import io
 import json
 import os
@@ -42,6 +43,8 @@ from torch.futures import Future
 from transformers import AutoTokenizer, Olmo3Config, Olmo3ForCausalLM
 
 from transformers.utils import strtobool
+
+DEFAULT_ROPE_THETA = 10000.0
 
 
 """
@@ -157,6 +160,21 @@ def get_layer_types(attention_config: dict[str, Any], n_layers: int) -> list[str
         layer_types[-1] = "full_attention"
 
     return layer_types
+
+
+def get_rope_theta(attention_config: dict[str, Any]) -> float:
+    rope_config = attention_config.get("rope")
+    if rope_config is None:
+        return DEFAULT_ROPE_THETA
+    rope_theta = rope_config.get("theta")
+    return DEFAULT_ROPE_THETA if rope_theta is None else rope_theta
+
+
+def get_rope_config_kwargs(rope_theta: float) -> dict[str, Any]:
+    olmo3_config_params = inspect.signature(Olmo3Config).parameters
+    if "rope_parameters" in olmo3_config_params:
+        return {"rope_parameters": {"rope_type": "default", "rope_theta": rope_theta}}
+    return {"rope_theta": rope_theta}
 
 
 def normalize_path(path: Path | str) -> str:
@@ -388,13 +406,8 @@ def write_model(
     n_heads = attention_config["n_heads"]
     dim = model_config["d_model"]
     dims_per_head = dim // n_heads
-    rope_config = attention_config.get("rope")
-    rope_theta = rope_config["theta"] if rope_config is not None else None
-    inv_freq = (
-        1.0 / (rope_theta ** (torch.arange(0, dims_per_head, 2).float() / dims_per_head))
-        if rope_theta is not None
-        else None
-    )
+    rope_theta = get_rope_theta(attention_config)
+    inv_freq = 1.0 / (rope_theta ** (torch.arange(0, dims_per_head, 2).float() / dims_per_head))
     max_position_embeddings = get_max_sequence_length(olmo3_config)
 
     if attention_config.get("n_kv_heads", None) is not None:
@@ -478,9 +491,9 @@ def write_model(
         eos_token_id=tokenizer_config["eos_token_id"],
         tie_word_embeddings=False,
         rms_norm_eps=block_config["layer_norm"]["eps"],
-        rope_theta=rope_theta,
         sliding_window=sliding_window,
         layer_types=layer_types,
+        **get_rope_config_kwargs(rope_theta),
     )
     config.save_pretrained(tmp_model_path)
 
