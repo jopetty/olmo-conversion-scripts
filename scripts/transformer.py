@@ -177,6 +177,14 @@ def get_rope_config_kwargs(rope_theta: float) -> dict[str, Any]:
     return {"rope_theta": rope_theta}
 
 
+def expand_head_qk_norm(weight: torch.Tensor, expected_size: int) -> torch.Tensor:
+    if weight.numel() == expected_size:
+        return weight
+    if expected_size % weight.numel() == 0:
+        return weight.repeat(expected_size // weight.numel())
+    raise ValueError(f"Cannot expand Q/K norm weight from {weight.numel()} to {expected_size}.")
+
+
 def normalize_path(path: Path | str) -> str:
     return str(path).rstrip("/").replace("file://", "")
 
@@ -405,15 +413,17 @@ def write_model(
     n_layers = model_config["n_layers"]
     n_heads = attention_config["n_heads"]
     dim = model_config["d_model"]
-    dims_per_head = dim // n_heads
+    head_dim = attention_config.get("head_dim", dim // n_heads)
     rope_theta = get_rope_theta(attention_config)
-    inv_freq = 1.0 / (rope_theta ** (torch.arange(0, dims_per_head, 2).float() / dims_per_head))
+    inv_freq = 1.0 / (rope_theta ** (torch.arange(0, head_dim, 2).float() / head_dim))
     max_position_embeddings = get_max_sequence_length(olmo3_config)
 
     if attention_config.get("n_kv_heads", None) is not None:
         num_key_value_heads = attention_config["n_kv_heads"]  # for GQA / MQA
     else:
         num_key_value_heads = n_heads
+    q_norm_size = n_heads * head_dim
+    k_norm_size = num_key_value_heads * head_dim
 
     sliding_window = None
     if attention_config.get("sliding_window") is not None:
@@ -438,8 +448,12 @@ def write_model(
             f"model.layers.{layer_i}.self_attn.k_proj.weight": loaded[f"blocks.{layer_i}.attention.w_k.weight"],
             f"model.layers.{layer_i}.self_attn.v_proj.weight": loaded[f"blocks.{layer_i}.attention.w_v.weight"],
             f"model.layers.{layer_i}.self_attn.o_proj.weight": loaded[f"blocks.{layer_i}.attention.w_out.weight"],
-            f"model.layers.{layer_i}.self_attn.q_norm.weight": loaded[f"blocks.{layer_i}.attention.q_norm.weight"],
-            f"model.layers.{layer_i}.self_attn.k_norm.weight": loaded[f"blocks.{layer_i}.attention.k_norm.weight"],
+            f"model.layers.{layer_i}.self_attn.q_norm.weight": expand_head_qk_norm(
+                loaded[f"blocks.{layer_i}.attention.q_norm.weight"], q_norm_size
+            ),
+            f"model.layers.{layer_i}.self_attn.k_norm.weight": expand_head_qk_norm(
+                loaded[f"blocks.{layer_i}.attention.k_norm.weight"], k_norm_size
+            ),
             f"model.layers.{layer_i}.mlp.gate_proj.weight": loaded[f"blocks.{layer_i}.feed_forward.w1.weight"],
             f"model.layers.{layer_i}.mlp.down_proj.weight": loaded[f"blocks.{layer_i}.feed_forward.w2.weight"],
             f"model.layers.{layer_i}.mlp.up_proj.weight": loaded[f"blocks.{layer_i}.feed_forward.w3.weight"],
@@ -485,6 +499,7 @@ def write_model(
         num_hidden_layers=n_layers,
         num_attention_heads=n_heads,
         num_key_value_heads=num_key_value_heads,
+        head_dim=head_dim,
         max_position_embeddings=max_position_embeddings,
         pad_token_id=tokenizer_config["pad_token_id"],
         bos_token_id=None,

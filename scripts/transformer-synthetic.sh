@@ -4,7 +4,7 @@ set -euo pipefail
 SOURCE_BASE_DIR="/weka/oe-training-default/ai2-llm/model-ladders/synthetic-ladder"
 TARGET_BASE_DIR="/weka/oe-training-default/ai2-llm/checkpoints/jacksonp"
 
-SIZE="20M"
+SIZE="60M"
 DATASET=""
 CHINCHILLA="Cx4"
 STEP=""
