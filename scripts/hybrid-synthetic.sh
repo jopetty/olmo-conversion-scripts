@@ -64,7 +64,7 @@ if [[ "$CHINCHILLA" != Cx* ]]; then
     CHINCHILLA="Cx${CHINCHILLA}"
 fi
 
-BASE_INPUT_DIR="${SOURCE_BASE_DIR}/${SIZE}/transformer/${DATASET}/${CHINCHILLA}"
+BASE_INPUT_DIR="${SOURCE_BASE_DIR}/${SIZE}/hybrid/${DATASET}/${CHINCHILLA}"
 
 if [[ ! -d "$BASE_INPUT_DIR" ]]; then
     echo "Checkpoint base directory does not exist: ${BASE_INPUT_DIR}" >&2

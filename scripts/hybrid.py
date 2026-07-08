@@ -384,6 +384,13 @@ def get_layer_types_from_config(config: dict[str, Any]) -> list[str]:
     block_config = model_config["block"]
     n_layers = model_config["n_layers"]
 
+    if block_pattern := model_config.get("block_pattern"):
+        layer_types = []
+        for i in range(n_layers):
+            block_name = block_pattern[i % len(block_pattern)]
+            layer_types.append(_layer_type_from_block(block_name, block_config[block_name]))
+        return layer_types
+
     if block_config.get("name") == "fla_hybrid":
         attention_indices = set(block_config.get("fla_hybrid_attention_indices", []))
         return [
@@ -400,6 +407,33 @@ def get_layer_types_from_config(config: dict[str, Any]) -> list[str]:
         ]
 
     return get_layer_types_from_checkpoint({}, n_layers)
+
+
+def _layer_type_from_block(block_name: str, block: dict[str, Any]) -> str:
+    sequence_mixer = block.get("sequence_mixer", block.get("attention", {}))
+    mixer_type = sequence_mixer.get("type")
+    if mixer_type == "attention" or block_name in {"attn", "attention"}:
+        return "full_attention"
+    if mixer_type == "gated_delta_net" or block_name in {"gdn", "fla", "linear_attention"}:
+        return "linear_attention"
+    raise ValueError(f"Could not infer layer type for block pattern entry {block_name!r}.")
+
+
+def _is_block_pattern_hybrid(model_config: dict[str, Any]) -> bool:
+    return bool(model_config.get("block_pattern"))
+
+
+def _block_pattern_block(model_config: dict[str, Any], layer_type: str) -> dict[str, Any]:
+    block_config = model_config["block"]
+    for block_name in model_config["block_pattern"]:
+        block = block_config[block_name]
+        if _layer_type_from_block(block_name, block) == layer_type:
+            return block
+    raise ValueError(f"Could not find {layer_type!r} block in block_pattern.")
+
+
+def _sequence_mixer_config(block: dict[str, Any]) -> dict[str, Any]:
+    return block.get("sequence_mixer", block.get("attention", {}))
 
 
 def get_layer_types_from_checkpoint(loaded: dict[str, torch.Tensor], n_layers: int) -> list[str]:
@@ -431,6 +465,16 @@ def _module_weight(loaded: dict[str, torch.Tensor], layer_i: int, suffix: str) -
             f"blocks.{layer_i}.fla.inner.{suffix}",
             f"blocks.{layer_i}.sequence_mixer.{suffix}",
             f"blocks.{layer_i}.sequence_mixer.inner.{suffix}",
+        ],
+    )
+
+
+def _attention_weight(loaded: dict[str, torch.Tensor], layer_i: int, suffix: str) -> torch.Tensor:
+    return _required_any(
+        loaded,
+        [
+            f"blocks.{layer_i}.attention.{suffix}",
+            f"blocks.{layer_i}.sequence_mixer.{suffix}",
         ],
     )
 
@@ -467,12 +511,12 @@ def convert_hybrid_attention_layer_weights(
     prefix = f"blocks.{layer_i}"
     hf_prefix = f"model.layers.{layer_i}"
     return {
-        f"{hf_prefix}.self_attn.q_proj.weight": loaded[f"{prefix}.attention.w_q.weight"],
-        f"{hf_prefix}.self_attn.k_proj.weight": loaded[f"{prefix}.attention.w_k.weight"],
-        f"{hf_prefix}.self_attn.v_proj.weight": loaded[f"{prefix}.attention.w_v.weight"],
-        f"{hf_prefix}.self_attn.o_proj.weight": loaded[f"{prefix}.attention.w_out.weight"],
-        f"{hf_prefix}.self_attn.q_norm.weight": loaded[f"{prefix}.attention.q_norm.weight"],
-        f"{hf_prefix}.self_attn.k_norm.weight": loaded[f"{prefix}.attention.k_norm.weight"],
+        f"{hf_prefix}.self_attn.q_proj.weight": _attention_weight(loaded, layer_i, "w_q.weight"),
+        f"{hf_prefix}.self_attn.k_proj.weight": _attention_weight(loaded, layer_i, "w_k.weight"),
+        f"{hf_prefix}.self_attn.v_proj.weight": _attention_weight(loaded, layer_i, "w_v.weight"),
+        f"{hf_prefix}.self_attn.o_proj.weight": _attention_weight(loaded, layer_i, "w_out.weight"),
+        f"{hf_prefix}.self_attn.q_norm.weight": _attention_weight(loaded, layer_i, "q_norm.weight"),
+        f"{hf_prefix}.self_attn.k_norm.weight": _attention_weight(loaded, layer_i, "k_norm.weight"),
         f"{hf_prefix}.mlp.gate_proj.weight": loaded[f"{prefix}.feed_forward.w1.weight"],
         f"{hf_prefix}.mlp.down_proj.weight": loaded[f"{prefix}.feed_forward.w2.weight"],
         f"{hf_prefix}.mlp.up_proj.weight": loaded[f"{prefix}.feed_forward.w3.weight"],
@@ -616,6 +660,8 @@ def write_model(
     block_config = model_config["block"]
     tokenizer_config = _get_tokenizer_config(olmo_config)
     is_fla_hybrid = block_config.get("name") == "fla_hybrid"
+    is_block_pattern_hybrid = _is_block_pattern_hybrid(model_config)
+    is_olmo_hybrid = is_fla_hybrid or is_block_pattern_hybrid
 
     n_layers = model_config["n_layers"]
     dim = model_config["d_model"]
@@ -625,6 +671,17 @@ def write_model(
         n_heads = attn_config["n_heads"]
         n_kv_heads = attn_config.get("n_kv_heads", n_heads)
         head_dim = attn_config.get("head_dim", dim // n_heads)
+        attention_block_config = block_config
+        feed_forward_config = block_config["feed_forward"]
+        layer_norm_config = block_config.get("layer_norm", {})
+    elif is_block_pattern_hybrid:
+        attention_block_config = _block_pattern_block(model_config, "full_attention")
+        attn_config = _sequence_mixer_config(attention_block_config)
+        n_heads = attn_config["n_heads"]
+        n_kv_heads = attn_config.get("n_kv_heads", n_heads)
+        head_dim = attn_config.get("head_dim", dim // n_heads)
+        feed_forward_config = attention_block_config["feed_forward"]
+        layer_norm_config = attention_block_config.get("layer_norm", {})
     elif block_overrides := model_config.get("block_overrides", {}):
         # Get attention config from the first override (full attention layer)
         first_override = next(iter(block_overrides.values()))
@@ -632,13 +689,22 @@ def write_model(
         n_heads = attn_config.get("n_heads", model_config.get("n_heads", 8))
         n_kv_heads = attn_config.get("n_kv_heads", n_heads)
         head_dim = attn_config.get("head_dim", dim // n_heads)
+        feed_forward_config = block_config["feed_forward"]
+        layer_norm_config = block_config.get("layer_norm", {})
     else:
         n_heads = model_config.get("n_heads", 8)
         n_kv_heads = n_heads
         head_dim = dim // n_heads
+        feed_forward_config = block_config["feed_forward"]
+        layer_norm_config = block_config.get("layer_norm", {})
 
     if is_fla_hybrid:
         gdn_config = block_config.get("fla", {}).get("fla_layer_kwargs", {})
+        gdn_n_heads = gdn_config.get("n_heads", gdn_config.get("num_heads", n_heads))
+        gdn_head_dim = gdn_config.get("head_dim", head_dim)
+    elif is_block_pattern_hybrid:
+        gdn_block_config = _block_pattern_block(model_config, "linear_attention")
+        gdn_config = _sequence_mixer_config(gdn_block_config)
         gdn_n_heads = gdn_config.get("n_heads", gdn_config.get("num_heads", n_heads))
         gdn_head_dim = gdn_config.get("head_dim", head_dim)
     else:
@@ -646,6 +712,10 @@ def write_model(
         gdn_config = block_config.get("sequence_mixer", {})
         gdn_n_heads = gdn_config.get("n_heads", n_heads)
         gdn_head_dim = gdn_config.get("head_dim", head_dim)
+    gdn_n_value_heads = gdn_config.get(
+        "n_v_heads",
+        gdn_config.get("n_value_heads", gdn_config.get("num_value_heads", gdn_n_heads)),
+    )
     gdn_expand_v = gdn_config.get("expand_v", 2.0)
     gdn_value_head_dim = int(gdn_head_dim * gdn_expand_v)
 
@@ -665,9 +735,9 @@ def write_model(
     for layer_i in range(n_layers):
         layer_type = layer_types[layer_i]
 
-        if is_fla_hybrid and layer_type == "linear_attention":
+        if is_olmo_hybrid and layer_type == "linear_attention":
             layer_state = convert_hybrid_gdn_layer_weights(loaded, layer_i)
-        elif is_fla_hybrid:
+        elif is_olmo_hybrid:
             layer_state = convert_hybrid_attention_layer_weights(loaded, layer_i)
         elif layer_type == "linear_attention":
             layer_state = convert_gdn_layer_weights(loaded, layer_i)
@@ -683,7 +753,7 @@ def write_model(
     full_state_dict["model.norm.weight"] = loaded["lm_head.norm.weight"]
     full_state_dict["lm_head.weight"] = loaded["lm_head.w_out.weight"]
     global_tensors = [loaded["embeddings.weight"], loaded["lm_head.norm.weight"], loaded["lm_head.w_out.weight"]]
-    if not is_fla_hybrid:
+    if not is_olmo_hybrid:
         full_state_dict["model.embed_norm.weight"] = loaded["embedding_norm.weight"]
         global_tensors.append(loaded["embedding_norm.weight"])
     param_count += sum(v.numel() for v in global_tensors)
@@ -693,29 +763,30 @@ def write_model(
 
     print(f"Total parameters: {param_count}")
 
-    if is_fla_hybrid:
-        rope_config = block_config["attention"].get("rope", {})
+    if is_olmo_hybrid:
+        rope_config = attn_config.get("rope", {})
         config = OlmoHybridConfig(
             vocab_size=model_config["vocab_size"],
             hidden_size=dim,
-            intermediate_size=block_config["feed_forward"]["hidden_size"],
+            intermediate_size=feed_forward_config["hidden_size"],
             num_hidden_layers=n_layers,
             num_attention_heads=n_heads,
             num_key_value_heads=n_kv_heads,
-            hidden_act=block_config["feed_forward"].get("activation", "silu"),
+            hidden_act=feed_forward_config.get("activation", "silu"),
             max_position_embeddings=max_sequence_length,
             pad_token_id=tokenizer_config.get("pad_token_id"),
             bos_token_id=tokenizer_config.get("bos_token_id"),
             eos_token_id=tokenizer_config.get("eos_token_id"),
             tie_word_embeddings=False,
-            rms_norm_eps=block_config.get("layer_norm", {}).get("eps", 1e-6),
+            rms_norm_eps=layer_norm_config.get("eps", 1e-6),
             rope_parameters={"rope_type": "default", "rope_theta": rope_config["theta"]} if rope_config else None,
-            attention_bias=block_config["attention"].get("bias", False),
+            attention_bias=attn_config.get("bias", False),
             layer_types=layer_types,
             linear_num_key_heads=gdn_n_heads,
-            linear_num_value_heads=gdn_n_heads,
+            linear_num_value_heads=gdn_n_value_heads,
             linear_key_head_dim=gdn_head_dim,
             linear_value_head_dim=gdn_value_head_dim,
+            linear_conv_kernel_dim=gdn_config.get("conv_size", gdn_config.get("conv_kernel_size", 4)),
             linear_allow_neg_eigval=gdn_config.get("allow_neg_eigval", True),
         )
         config.architectures = ["OlmoHybridForCausalLM"]
@@ -724,7 +795,7 @@ def write_model(
         config = OlmoHybridSmallConfig(
             vocab_size=model_config["vocab_size"],
             hidden_size=dim,
-            intermediate_size=block_config["feed_forward"]["hidden_size"],
+            intermediate_size=feed_forward_config["hidden_size"],
             num_hidden_layers=n_layers,
             num_attention_heads=n_heads,
             num_key_value_heads=n_kv_heads,
@@ -734,13 +805,15 @@ def write_model(
             bos_token_id=tokenizer_config.get("bos_token_id"),
             eos_token_id=tokenizer_config.get("eos_token_id"),
             tie_word_embeddings=False,
-            rms_norm_eps=block_config.get("layer_norm", {}).get("eps", 1e-6),
+            rms_norm_eps=layer_norm_config.get("eps", 1e-6),
             layer_types=layer_types,
             # GDN config
             linear_num_key_heads=gdn_n_heads,
-            linear_num_value_heads=gdn_n_heads,
+            linear_num_value_heads=gdn_n_value_heads,
             linear_key_head_dim=gdn_head_dim,
             linear_value_head_dim=gdn_value_head_dim,
+            linear_conv_kernel_dim=gdn_config.get("conv_size", gdn_config.get("conv_kernel_size", 4)),
+            linear_allow_neg_eigval=gdn_config.get("allow_neg_eigval", True),
         )
 
         # Explicitly ensure NoPE — prevent Transformers from re-enabling RoPE
@@ -766,7 +839,7 @@ def write_model(
     if include_tokenizer:
         _write_tokenizer(model_path, tokenizer_id, tokenizer_config, max_sequence_length)
 
-    if not is_fla_hybrid:
+    if not is_olmo_hybrid:
         # Patch config.json to ensure rope_parameters stays null
         # (config.save_pretrained may have written a default)
         _patch_config_rope(model_path)
