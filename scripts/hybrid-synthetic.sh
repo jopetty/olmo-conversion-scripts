@@ -6,7 +6,7 @@ TARGET_BASE_DIR="/weka/oe-training-default/ai2-llm/checkpoints/jacksonp"
 
 SIZE="60M"
 DATASET=""
-CHINCHILLA="Cx4"
+CHINCHILLA=""
 STEP=""
 
 usage() {
@@ -49,7 +49,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-if [[ -z "$SIZE" || -z "$DATASET" || -z "$CHINCHILLA" ]]; then
+if [[ -z "$SIZE" || -z "$DATASET" ]]; then
     echo "Missing required argument." >&2
     usage >&2
     exit 1
@@ -60,11 +60,39 @@ if [[ -n "$STEP" && ! "$STEP" =~ ^[0-9]+$ ]]; then
     exit 1
 fi
 
-if [[ "$CHINCHILLA" != Cx* ]]; then
-    CHINCHILLA="Cx${CHINCHILLA}"
+DATASET_INPUT_DIR="${SOURCE_BASE_DIR}/${SIZE}/hybrid/${DATASET}"
+
+if [[ ! -d "$DATASET_INPUT_DIR" ]]; then
+    echo "Dataset checkpoint directory does not exist: ${DATASET_INPUT_DIR}" >&2
+    exit 1
 fi
 
-BASE_INPUT_DIR="${SOURCE_BASE_DIR}/${SIZE}/hybrid/${DATASET}/${CHINCHILLA}"
+if [[ -n "$CHINCHILLA" ]]; then
+    if [[ "$CHINCHILLA" != Cx* ]]; then
+        CHINCHILLA="Cx${CHINCHILLA}"
+    fi
+else
+    CHINCHILLA_DIRS=()
+    while IFS= read -r CHINCHILLA_DIR; do
+        CHINCHILLA_DIRS+=("$(basename "$CHINCHILLA_DIR")")
+    done < <(find "$DATASET_INPUT_DIR" -maxdepth 1 -type d -name 'Cx*' | sort)
+
+    if [[ "${#CHINCHILLA_DIRS[@]}" -eq 0 ]]; then
+        echo "No Cx checkpoint directories found in: ${DATASET_INPUT_DIR}" >&2
+        exit 1
+    fi
+
+    if [[ "${#CHINCHILLA_DIRS[@]}" -gt 1 ]]; then
+        echo "Multiple Cx checkpoint directories found in ${DATASET_INPUT_DIR}: ${CHINCHILLA_DIRS[*]}" >&2
+        echo "Pass --chinchilla explicitly." >&2
+        exit 1
+    fi
+
+    CHINCHILLA="${CHINCHILLA_DIRS[0]}"
+    echo "Inferred --chinchilla ${CHINCHILLA} from ${DATASET_INPUT_DIR}"
+fi
+
+BASE_INPUT_DIR="${DATASET_INPUT_DIR}/${CHINCHILLA}"
 
 if [[ ! -d "$BASE_INPUT_DIR" ]]; then
     echo "Checkpoint base directory does not exist: ${BASE_INPUT_DIR}" >&2
