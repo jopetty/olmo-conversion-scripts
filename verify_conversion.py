@@ -38,6 +38,8 @@ DTYPES = {
     "bfloat16": torch.bfloat16,
 }
 
+FLASH_ATTENTION_BACKENDS = {"flash_2", "flash_3", "flash_4"}
+
 
 # Keep this suite identical to the upstream OLMo-core verification script.
 TEST_SEQUENCES = [
@@ -148,6 +150,7 @@ def load_olmo_core_model(
     checkpoint_dir: str,
     device: torch.device,
     dtype: torch.dtype,
+    attention_backend: str,
 ) -> tuple[Any, int]:
     """Build an OLMo-core model and load its distributed checkpoint weights."""
     from olmo_core.distributed.checkpoint import load_model_and_optim_state
@@ -166,6 +169,16 @@ def load_olmo_core_model(
     for key in ("compile", "dp_config", "tp_config", "float8_config"):
         transformer_config_dict.pop(key, None)
 
+    if attention_backend != "config":
+        replaced_backends = replace_attention_backends(
+            transformer_config_dict, attention_backend
+        )
+        log.info(
+            "Using attention backend '%s' for %d configured attention module(s)",
+            attention_backend,
+            replaced_backends,
+        )
+
     model_config = TransformerConfig.from_dict(transformer_config_dict)
     log.info("Building OLMo-core model (vocab size %d)...", model_config.vocab_size)
     model = model_config.build(init_device="meta")
@@ -178,6 +191,22 @@ def load_olmo_core_model(
     model.to(device=device, dtype=dtype)
     model.eval()
     return model, model_config.vocab_size
+
+
+def replace_attention_backends(config: dict[str, Any], backend: str) -> int:
+    """Replace FlashAttention backend names in a serialized model config."""
+    replacements = 0
+    for key, value in config.items():
+        if key == "backend" and value in FLASH_ATTENTION_BACKENDS:
+            config[key] = backend
+            replacements += 1
+        elif isinstance(value, dict):
+            replacements += replace_attention_backends(value, backend)
+        elif isinstance(value, list):
+            for item in value:
+                if isinstance(item, dict):
+                    replacements += replace_attention_backends(item, backend)
+    return replacements
 
 
 def load_hf_model(
@@ -260,7 +289,7 @@ def run(args: argparse.Namespace) -> int:
     log.info("Testing %d sequences", len(sequences))
     log.info("Loading OLMo-core checkpoint...")
     core_model, core_vocab_size = load_olmo_core_model(
-        args.olmo_core_checkpoint, device, dtype
+        args.olmo_core_checkpoint, device, dtype, args.attention_backend
     )
     log.info("Loading Hugging Face checkpoint...")
     hf_model, hf_vocab_size = load_hf_model(args.hf_checkpoint, device, dtype)
@@ -411,6 +440,15 @@ def main() -> int:
         choices=sorted(DTYPES),
         default="bfloat16",
         help="Inference dtype for both models (default: bfloat16)",
+    )
+    parser.add_argument(
+        "--attention-backend",
+        choices=["config", "torch", "flash_2", "flash_3", "flash_4"],
+        default="torch",
+        help=(
+            "OLMo-core attention backend. 'torch' works on all GPUs and is the "
+            "default; 'config' preserves the checkpoint setting."
+        ),
     )
     parser.add_argument(
         "--atol",
