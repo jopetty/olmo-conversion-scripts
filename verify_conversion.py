@@ -21,6 +21,7 @@ import argparse
 import gc
 import json
 import logging
+import math
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
@@ -39,6 +40,7 @@ DTYPES = {
 }
 
 FLASH_ATTENTION_BACKENDS = {"flash_2", "flash_3", "flash_4"}
+MAX_P95_SAMPLES = 1_000_000
 
 
 # Keep this suite identical to the upstream OLMo-core verification script.
@@ -219,7 +221,7 @@ def load_hf_model(
     model: Any = AutoModelForCausalLM.from_pretrained(
         checkpoint_dir,
         trust_remote_code=True,
-        torch_dtype=dtype,
+        dtype=dtype,
     )
     model.to(device=device)
     model.eval()
@@ -260,6 +262,10 @@ def compare_logits(
         }
 
     difference = (core_logits - hf_logits).abs()
+    p95_values = difference.flatten()
+    if p95_values.numel() > MAX_P95_SAMPLES:
+        stride = math.ceil(p95_values.numel() / MAX_P95_SAMPLES)
+        p95_values = p95_values[::stride]
     core_top1 = core_logits.argmax(dim=-1)
     hf_top1 = hf_logits.argmax(dim=-1)
     top1_matches = int((core_top1 == hf_top1).sum().item())
@@ -270,7 +276,8 @@ def compare_logits(
         "allclose": bool(torch.allclose(core_logits, hf_logits, atol=atol, rtol=rtol)),
         "max_abs_diff": float(difference.max().item()),
         "mean_abs_diff": float(difference.mean().item()),
-        "p95_abs_diff": float(torch.quantile(difference.flatten(), 0.95).item()),
+        "p95_abs_diff": float(torch.quantile(p95_values, 0.95).item()),
+        "p95_sample_count": p95_values.numel(),
         "top1_matches": top1_matches,
         "top1_positions": positions,
         "top1_rate": 100.0 * top1_matches / positions if positions else 100.0,
