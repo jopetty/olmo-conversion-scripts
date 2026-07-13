@@ -11,6 +11,7 @@ dependencies = [
 ]
 
 [tool.uv.sources]
+ai2-olmo-core = { git = "https://github.com/YashasSamaga/OLMo-core.git", rev = "hybrid-final" }
 transformers = { git = "https://github.com/YashasSamaga/transformers.git", rev = "hybrid-small-suite" }
 torch = { index = "pytorch-cu128" }
 
