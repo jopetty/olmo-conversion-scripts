@@ -1,21 +1,22 @@
 {
   "seed": 42,
-  "size": "20M",
+  "size": "60M",
   "model": {
-    "d_model": 128,
+    "d_model": 384,
     "vocab_size": 100352,
-    "n_layers": 14,
+    "n_layers": 8,
     "block": {
       "sequence_mixer": {
         "name": "default",
-        "n_heads": 2,
-        "n_kv_heads": 2,
-        "head_dim": 64,
+        "n_heads": 8,
         "bias": false,
-        "gate": {
-          "granularity": "elementwise",
+        "rope": {
+          "name": "default",
+          "theta": 500000,
           "full_precision": true,
-          "_CLASS_": "olmo_core.nn.attention.GateConfig"
+          "no_global_rope": false,
+          "partial_rotary_factor": 1.0,
+          "_CLASS_": "olmo_core.nn.rope.RoPEConfig"
         },
         "qk_norm": {
           "name": "rms",
@@ -26,7 +27,13 @@
         },
         "backend": "flash_3",
         "dtype": "float32",
-        "use_head_qk_norm": true,
+        "sliding_window": {
+          "pattern": [4096, 4096, 4096, -1],
+          "force_full_attention_on_first_layer": false,
+          "force_full_attention_on_last_layer": true,
+          "_CLASS_": "olmo_core.nn.attention.SlidingWindowAttentionConfig"
+        },
+        "use_head_qk_norm": false,
         "_CLASS_": "olmo_core.nn.attention.AttentionConfig",
         "type": "attention"
       },
@@ -38,14 +45,14 @@
         "_CLASS_": "olmo_core.nn.layer_norm.LayerNormConfig"
       },
       "feed_forward": {
-        "hidden_size": 1024,
+        "hidden_size": 1536,
         "name": "default",
         "bias": false,
         "dtype": "float32",
         "activation": "silu",
         "_CLASS_": "olmo_core.nn.feed_forward.FeedForwardConfig"
       },
-      "name": "peri_norm",
+      "name": "reordered_norm",
       "_CLASS_": "olmo_core.nn.transformer.config.TransformerBlockConfig"
     },
     "lm_head": {
@@ -62,19 +69,12 @@
       "loss_implementation": "default",
       "_CLASS_": "olmo_core.nn.lm_head.LMHeadConfig"
     },
-    "embedding_norm": {
-      "name": "rms",
-      "eps": 1e-6,
-      "bias": false,
-      "_CLASS_": "olmo_core.nn.layer_norm.LayerNormConfig"
-    },
     "name": "default",
     "dtype": "float32",
     "init_method": "normal",
     "init_seed": 0,
     "init_std": 0.02,
-    "embed_scale": 11.313708498984761,
-    "tie_word_embeddings": true,
+    "tie_word_embeddings": false,
     "_CLASS_": "olmo_core.nn.transformer.config.TransformerConfig"
   },
   "optim": {
@@ -87,7 +87,7 @@
     ],
     "compile": false,
     "fixed_fields": ["initial_lr"],
-    "lr": 0.0059478502852063015,
+    "lr": 0.00290078685078361,
     "betas": [0.9, 0.99],
     "eps": 1e-8,
     "weight_decay": 0.1,
@@ -102,8 +102,8 @@
     "lr_field": "lr",
     "initial_lr_field": "initial_lr",
     "units": "tokens",
-    "period_lengths": [66600960, 66600960, 133251072, 266452992],
-    "warmup": 6661120,
+    "period_lengths": [574095360, 574357504, 1148452864, 2296905728],
+    "warmup": 57422208,
     "decay_fraction": 0.1,
     "warmup_min_lr": 0.0,
     "decay_min_lr": 0.0,
@@ -140,23 +140,23 @@
                 "_CLASS_": "olmo_core.data.tokenizer.TokenizerConfig"
               },
               "source_group_size": -1,
-              "label": "aperiodic_unsupervised-s2_lt512",
+              "label": "aperiodic_100supervision_assignments_lt10",
               "long_doc_strategy": "truncate",
               "source_paths": [
-                "/weka/oe-training-default/jacksonp/sensitivity-data/data/processed/aperiodic_unsupervised_n200000000_v26_a50_m64_z1p2_s2_lt512/*.npy"
+                "/weka/oe-training-default/jacksonp/sensitivity-data/data/processed/aperiodic_100supervision_n200000000_v26_a50_m64_z1p2_assignments_lt10/*.npy"
               ],
               "expand_glob": true,
               "_CLASS_": "olmo_core.data.composable.numpy_document_source.NumpyDocumentSourceConfig"
             }
           ],
           "sequence_length": 8192,
-          "label": "aperiodic_unsupervised-s2_lt512",
+          "label": "aperiodic_100supervision_assignments_lt10",
           "_CLASS_": "olmo_core.data.composable.concat_and_chunk_instance_source.ConcatAndChunkInstanceSourceConfig"
         }
       ],
-      "max_tokens": 532905984,
+      "max_tokens": 4593811456,
       "seed": 0,
-      "label": "aperiodic_unsupervised-s2_lt512",
+      "label": "aperiodic_100supervision_assignments_lt10",
       "_CLASS_": "olmo_core.data.composable.sampling_instance_source.SamplingInstanceSourceConfig"
     }
   ]
