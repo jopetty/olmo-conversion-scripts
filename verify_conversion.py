@@ -22,6 +22,8 @@ import gc
 import json
 import logging
 import math
+import os
+import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
@@ -41,6 +43,13 @@ DTYPES = {
 
 FLASH_ATTENTION_BACKENDS = {"flash_2", "flash_3", "flash_4"}
 MAX_P95_SAMPLES = 1_000_000
+
+
+def color(text: str, code: int) -> str:
+    """Color terminal output while remaining safe for redirected output."""
+    if not sys.stdout.isatty() or os.environ.get("NO_COLOR") is not None:
+        return text
+    return f"\033[{code}m{text}\033[0m"
 
 
 # Keep this suite identical to the upstream OLMo-core verification script.
@@ -377,11 +386,23 @@ def run(args: argparse.Namespace) -> int:
     total_top1_matches = sum(int(result.get("top1_matches", 0)) for result in results)
     allclose = all(bool(result["allclose"]) for result in results)
     shape_match = all(bool(result["shape_match"]) for result in results)
+    sequence_passes = sum(
+        bool(
+            result["shape_match"]
+            and result["allclose"]
+            and result.get("top1_matches", 0) == result.get("top1_positions", 0)
+        )
+        for result in results
+    )
+    sequence_failures = len(results) - sequence_passes
     top1_rate = 100.0 * total_top1_matches / total_positions if total_positions else 0.0
     max_abs_diff = max(float(result.get("max_abs_diff", float("inf"))) for result in results)
     mean_abs_diff = sum(float(result.get("mean_abs_diff", float("inf"))) for result in results) / len(results)
 
     passed = shape_match and allclose and total_top1_matches == total_positions
+    pass_squares = color("■" * sequence_passes, 32)
+    fail_squares = color("■" * sequence_failures, 31)
+    sequence_bar = pass_squares + fail_squares
     report = {
         "passed": passed,
         "olmo_core_checkpoint": args.olmo_core_checkpoint,
@@ -394,6 +415,8 @@ def run(args: argparse.Namespace) -> int:
         "hf_vocab_size": hf_vocab_size,
         "sequences_tested": len(results),
         "sequences_skipped": skipped,
+        "sequence_passes": sequence_passes,
+        "sequence_failures": sequence_failures,
         "positions_tested": total_positions,
         "top1_matches": total_top1_matches,
         "top1_rate": top1_rate,
@@ -406,11 +429,17 @@ def run(args: argparse.Namespace) -> int:
     print("CONVERSION VERIFICATION")
     print("=" * 72)
     print(f"Sequences:       {len(results)} tested, {skipped} skipped")
+    print(f"Test results:    {sequence_bar}")
+    print(
+        f"                 {color(f'{sequence_passes} passed', 32)} / "
+        f"{color(f'{sequence_failures} failed', 31)}"
+    )
     print(f"Positions:       {total_top1_matches}/{total_positions} top-1 matches ({top1_rate:.2f}%)")
     print(f"Max abs diff:     {max_abs_diff:.6g}")
     print(f"Mean abs diff:    {mean_abs_diff:.6g}")
     print(f"Allclose:         {allclose} (atol={args.atol}, rtol={args.rtol})")
-    print(f"RESULT:           {'PASS' if passed else 'FAIL'}")
+    result_text = color("PASS", 32) if passed else color("FAIL", 31)
+    print(f"RESULT:           {result_text}")
     print("=" * 72)
 
     if args.output:
