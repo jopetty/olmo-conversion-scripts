@@ -148,7 +148,7 @@ for INPUT_DIR in "${STEP_DIRS[@]}"; do
 
     echo "Loading checkpoint from ${INPUT_DIR}"
 
-    if ! TRUST_REMOTE_CODE=True uv run python scripts/hybrid.py \
+    if ! TRUST_REMOTE_CODE=True uv run python hybrid_synthetic.py \
         --input_dir "$INPUT_DIR" \
         --output_dir "$OUTPUT_DIR" \
         --tokenizer allenai/Olmo-Hybrid-7B; then
