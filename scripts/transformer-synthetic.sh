@@ -2,7 +2,6 @@
 set -euo pipefail
 
 SOURCE_BASE_DIR="/weka/oe-training-default/ai2-llm/model-ladders/synthetic-ladder"
-TARGET_BASE_DIR="/weka/oe-training-default/ai2-llm/checkpoints/jacksonp"
 
 SIZE="60M"
 DATASET=""
@@ -147,8 +146,6 @@ fi
 CONVERSIONS_COMPLETED=0
 
 for SEED_DIR in "${SEED_DIRS[@]}"; do
-    SEED_DIR_NAME="$(basename "$SEED_DIR")"
-
     if [[ -n "$STEP" ]]; then
         STEP_DIRS=("${SEED_DIR}/step${STEP}")
     else
@@ -180,9 +177,7 @@ for SEED_DIR in "${SEED_DIRS[@]}"; do
     fi
 
     for INPUT_DIR in "${STEP_DIRS[@]}"; do
-        STEP_DIR_NAME="$(basename "$INPUT_DIR")"
-        STEP_NUMBER="${STEP_DIR_NAME#step}"
-        OUTPUT_DIR="${TARGET_BASE_DIR}/transformer-${DATASET}-${CHINCHILLA}-${SEED_DIR_NAME}/${SIZE}/step${STEP_NUMBER}"
+        OUTPUT_DIR="${INPUT_DIR}-hf"
 
         if [[ ! -d "$INPUT_DIR" ]]; then
             echo "Skipping missing checkpoint directory: ${INPUT_DIR}" >&2
