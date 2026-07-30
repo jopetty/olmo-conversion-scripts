@@ -7,10 +7,11 @@ SIZE="60M"
 DATASET=""
 CHINCHILLA=""
 SEED=""
+STEP=""
 
 usage() {
     cat <<EOF
-Usage: $0 --dataset DATASET [--size SIZE] [--chinchilla CHINCHILLA] [--seed SEED]
+Usage: $0 --dataset DATASET [--size SIZE] [--step STEP] [--chinchilla CHINCHILLA] [--seed SEED]
 
 Datasets:
   integer-code--r-trivial
@@ -19,7 +20,7 @@ Datasets:
 
 Examples:
   $0 --dataset integer-code--r-trivial
-  $0 --dataset integer-code--aperiodic --chinchilla 1 --seed 0
+  $0 --dataset integer-code--aperiodic --chinchilla 1 --seed 0 --step 0
 EOF
 }
 
@@ -31,6 +32,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --dataset)
             DATASET="$2"
+            shift 2
+            ;;
+        --step)
+            STEP="$2"
             shift 2
             ;;
         --chinchilla)
@@ -71,6 +76,11 @@ esac
 
 if [[ -n "$SEED" && ! "$SEED" =~ ^[0-9]+$ ]]; then
     echo "--seed must be an integer, got: $SEED" >&2
+    exit 1
+fi
+
+if [[ -n "$STEP" && ! "$STEP" =~ ^[0-9]+$ ]]; then
+    echo "--step must be an integer, got: $STEP" >&2
     exit 1
 fi
 
@@ -150,25 +160,62 @@ fi
 
 CONVERSIONS_COMPLETED=0
 
-for INPUT_DIR in "${SEED_DIRS[@]}"; do
-    OUTPUT_DIR="${INPUT_DIR}-hf"
+for SEED_DIR in "${SEED_DIRS[@]}"; do
+    if [[ -n "$STEP" ]]; then
+        STEP_DIRS=("${SEED_DIR}/step${STEP}")
+    else
+        STEP_DIRS=()
+        while IFS= read -r STEP_DIR; do
+            STEP_DIR_NAME="$(basename "$STEP_DIR")"
+            if [[ ! "$STEP_DIR_NAME" =~ ^step[0-9]+$ ]]; then
+                continue
+            fi
+            STEP_DIRS+=("$STEP_DIR")
+        done < <(find "$SEED_DIR" -maxdepth 1 -type d -name 'step[0-9]*')
 
-    if [[ -z "$(find "$INPUT_DIR" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
-        echo "Skipping empty checkpoint directory: ${INPUT_DIR}" >&2
-        continue
+        if [[ "${#STEP_DIRS[@]}" -eq 0 ]]; then
+            echo "No checkpoint step directories found in: ${SEED_DIR}; skipping." >&2
+            continue
+        fi
+
+        for ((i = 0; i < ${#STEP_DIRS[@]}; i++)); do
+            for ((j = i + 1; j < ${#STEP_DIRS[@]}; j++)); do
+                STEP_I="${STEP_DIRS[i]##*/step}"
+                STEP_J="${STEP_DIRS[j]##*/step}"
+                if ((10#$STEP_J < 10#$STEP_I)); then
+                    TMP_STEP_DIR="${STEP_DIRS[i]}"
+                    STEP_DIRS[i]="${STEP_DIRS[j]}"
+                    STEP_DIRS[j]="$TMP_STEP_DIR"
+                fi
+            done
+        done
     fi
 
-    echo "Loading checkpoint from ${INPUT_DIR}"
+    for INPUT_DIR in "${STEP_DIRS[@]}"; do
+        OUTPUT_DIR="${INPUT_DIR}-hf"
 
-    if ! TRUST_REMOTE_CODE=True uv run python transformer_synthetic.py \
-        --input_dir "$INPUT_DIR" \
-        --output_dir "$OUTPUT_DIR" \
-        --tokenizer allenai/Olmo-Hybrid-7B; then
-        echo "Conversion failed for ${INPUT_DIR}; continuing." >&2
-        continue
-    fi
+        if [[ ! -d "$INPUT_DIR" ]]; then
+            echo "Skipping missing checkpoint directory: ${INPUT_DIR}" >&2
+            continue
+        fi
 
-    CONVERSIONS_COMPLETED=$((CONVERSIONS_COMPLETED + 1))
+        if [[ -z "$(find "$INPUT_DIR" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
+            echo "Skipping empty checkpoint directory: ${INPUT_DIR}" >&2
+            continue
+        fi
+
+        echo "Loading checkpoint from ${INPUT_DIR}"
+
+        if ! TRUST_REMOTE_CODE=True uv run python transformer_synthetic.py \
+            --input_dir "$INPUT_DIR" \
+            --output_dir "$OUTPUT_DIR" \
+            --tokenizer allenai/Olmo-Hybrid-7B; then
+            echo "Conversion failed for ${INPUT_DIR}; continuing." >&2
+            continue
+        fi
+
+        CONVERSIONS_COMPLETED=$((CONVERSIONS_COMPLETED + 1))
+    done
 done
 
 if [[ "$CONVERSIONS_COMPLETED" -eq 0 ]]; then
